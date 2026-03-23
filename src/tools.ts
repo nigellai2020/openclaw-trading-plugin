@@ -515,6 +515,20 @@ export default function (api: any) {
     );
   }
 
+  function resolveMarketType(_mode: string, marketType?: string): "spot" | "perp" {
+    return marketType === "perp" ? "perp" : "spot";
+  }
+
+  function resolveLiveChainId(chainId?: number): 998 | 999 {
+    if (chainId == null) {
+      throw new Error("chainId is required for live mode (998=testnet, 999=mainnet)");
+    }
+    if (chainId !== 998 && chainId !== 999) {
+      throw new Error("Invalid chainId for live mode. Use 998 for Hyperliquid testnet or 999 for Hyperliquid mainnet");
+    }
+    return chainId;
+  }
+
   function buildBillingWallet(): Wallet {
     const privateKey = pluginConfig.nostrPrivateKey;
     if (!privateKey) {
@@ -673,18 +687,32 @@ export default function (api: any) {
   }
 
   async function fetchBillingSubscriptions(wallet: Wallet): Promise<any[]> {
+    const snapshot = await fetchBillingSubscriptionsSnapshot(wallet);
+    return snapshot.subscriptions;
+  }
+
+  async function fetchBillingSubscriptionsSnapshot(wallet: Wallet): Promise<{
+    subscriptions: any[];
+    walletRegistered: boolean;
+  }> {
     const url = `${baseUrl}/api/billing-subscriptions`;
     debugLog("billing", "api.req /api/billing-subscriptions", { url, walletAddress: wallet.address });
     const { res, body } = await billingFetch(url, wallet);
     debugLog("billing", "api.res /api/billing-subscriptions", { status: res.status, body, walletAddress: wallet.address });
     if (isWalletNotRegisteredError(res.status, body)) {
-      return [];
+      return {
+        subscriptions: [],
+        walletRegistered: false,
+      };
     }
     if (!res.ok) {
       throw new Error(`billing-subscriptions failed: ${res.status} ${responseErrorMessage(body)}`);
     }
     const data = extractApiData<any>(body);
-    return Array.isArray(data) ? data : [];
+    return {
+      subscriptions: Array.isArray(data) ? data : [],
+      walletRegistered: true,
+    };
   }
 
   async function prepareAgentCreationContext(input: {
@@ -697,7 +725,7 @@ export default function (api: any) {
     privateKey: string;
   }): Promise<PreparedAgentCreationContext> {
     const mode = input.mode ?? "paper";
-    const marketType = input.marketType ?? "spot";
+    const marketType = resolveMarketType(mode, input.marketType);
     const eligibleOptions = [{
       name: billingEvmConfig.eligibleNftName,
       contractAddress: billingEvmConfig.eligibleNftAddress,
@@ -802,21 +830,23 @@ export default function (api: any) {
       provider.getFeeData(),
     ]);
 
-    const operatingFeeRaw = feeQuote.operatingFeeRaw;
-    const protocolFeeRaw = feeQuote.protocolFeeRaw;
-    const strategyFeeRaw = feeQuote.strategyFeeRaw;
-    const firstBillingAmountRaw = operatingFeeRaw + protocolFeeRaw + strategyFeeRaw;
-    const targetVaultCreditRaw = firstBillingAmountRaw;
+    const operatingFeeRaw: bigint = feeQuote.operatingFeeRaw;
+    const protocolFeeRaw: bigint = feeQuote.protocolFeeRaw;
+    const strategyFeeRaw: bigint = feeQuote.strategyFeeRaw;
+    const firstBillingAmountRaw: bigint = operatingFeeRaw + protocolFeeRaw + strategyFeeRaw;
+    const targetVaultCreditRaw: bigint = firstBillingAmountRaw;
 
     const walletOswapBalanceRaw = BigInt(rawOswapBalance.toString());
     const walletBnbBalanceRaw = BigInt(rawBnbBalance.toString());
     const hasEligibleNft = BigInt(rawNftBalance.toString()) > 0n;
-    const existingVaultCreditRaw = billingBalance.availableBalanceRaw;
-    const oswapForNftRaw = hasEligibleNft
+    const existingVaultCreditRaw: bigint = billingBalance.availableBalanceRaw;
+    const oswapForNftRaw: bigint = hasEligibleNft
       ? 0n
       : parseTokenAmount(billingEvmConfig.eligibleNftTotalMintingFee, billingEvmConfig.tokenDecimals);
-    const oswapForInitialVaultCreditRaw = maxBigInt(0n, targetVaultCreditRaw - existingVaultCreditRaw);
-    const requiredOswapRaw = oswapForNftRaw + oswapForInitialVaultCreditRaw;
+    const oswapForInitialVaultCreditRaw: bigint = targetVaultCreditRaw > existingVaultCreditRaw
+      ? targetVaultCreditRaw - existingVaultCreditRaw
+      : 0n;
+    const requiredOswapRaw: bigint = oswapForNftRaw + oswapForInitialVaultCreditRaw;
     const oswapShortfallRaw = maxBigInt(0n, requiredOswapRaw - walletOswapBalanceRaw);
     const nftApprovalRequired = oswapForNftRaw > 0n && BigInt(rawNftAllowance.toString()) < oswapForNftRaw;
     const vaultApprovalRequired = oswapForInitialVaultCreditRaw > 0n && BigInt(rawVaultAllowance.toString()) < oswapForInitialVaultCreditRaw;
@@ -1192,6 +1222,43 @@ export default function (api: any) {
   });
 
   api.registerTool({
+    name: "get_billing_subscriptions",
+    description: "List billing subscriptions for the billing wallet derived from nostrPrivateKey. Automatically ensures the billing wallet is registered before fetching subscriptions.",
+    parameters: Type.Object({}),
+    async execute() {
+      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
+      const billingWallet = buildBillingWallet();
+      debugLog("get_billing_subscriptions", "entry", {
+        walletAddress: billingWallet.address,
+        usesNostrPrivateKey: true,
+      });
+      try {
+        const registration = await ensureBillingWalletRegistered({
+          npub,
+          publicKey,
+          privateKey,
+          wallet: billingWallet,
+        });
+        const { subscriptions, walletRegistered } = await fetchBillingSubscriptionsSnapshot(billingWallet);
+        const result = {
+          walletAddress: billingWallet.address,
+          walletRegistered,
+          billingWalletRegistration: registration,
+          subscriptions,
+        };
+        debugLog("get_billing_subscriptions", "result", result);
+        return textResult(result);
+      } catch (e: any) {
+        return textResult({
+          walletAddress: billingWallet.address,
+          walletRegistered: false,
+          error: e.message,
+        });
+      }
+    },
+  });
+
+  api.registerTool({
     name: "get_agent",
     description: "Get details of a trading agent by ID",
     parameters: Type.Object({
@@ -1518,7 +1585,7 @@ export default function (api: any) {
       masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (live mode, for settlement)" })),
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
       protocol: Type.Optional(Type.String({ description: '"hyperliquid"', default: "hyperliquid" })),
-      chainId: Type.Optional(Type.Number({ description: "Chain ID (998=testnet)" })),
+      chainId: Type.Optional(Type.Number({ description: "Live mode only: 998=testnet, 999=mainnet" })),
       leverage: Type.Optional(Type.Number({ description: "Leverage multiplier" })),
     }),
     async execute(
@@ -1543,8 +1610,26 @@ export default function (api: any) {
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
       const mode = params.mode ?? "paper";
-      const marketType = params.marketType ?? "spot";
       const isLive = mode === "live";
+      let marketType: "spot" | "perp" = "spot";
+      let liveChainId: 998 | 999 | undefined;
+      try {
+        marketType = resolveMarketType(mode, params.marketType);
+        if (isLive) {
+          liveChainId = resolveLiveChainId(params.chainId);
+          if (params.walletId == null) {
+            return textResult({ error: "walletId is required for live mode" });
+          }
+          if (!params.walletAddress) {
+            return textResult({ error: "walletAddress is required for live mode" });
+          }
+          if (!params.masterWalletAddress) {
+            return textResult({ error: "masterWalletAddress is required for live mode" });
+          }
+        }
+      } catch (e: any) {
+        return textResult({ error: e.message });
+      }
       debugLog("deploy_agent", "entry", { ...params, usesNostrPrivateKey: true });
       const result: Record<string, unknown> = {};
       let preparedContext: PreparedAgentCreationContext;
@@ -1555,10 +1640,9 @@ export default function (api: any) {
       // Auto-fetch initial capital for live mode
       let initialCapital = params.initialCapital;
       if (isLive && initialCapital == null && params.masterWalletAddress) {
-        const chainId = params.chainId ?? 998;
-        const balance = await fetchUsdcBalance(params.masterWalletAddress, chainId);
+        const balance = await fetchUsdcBalance(params.masterWalletAddress, liveChainId!);
         if (balance === 0) {
-          const appUrl = chainId === 999
+          const appUrl = liveChainId === 999
             ? "https://app.hyperliquid.xyz"
             : "https://app.hyperliquid-testnet.xyz";
           return textResult({
@@ -1763,7 +1847,7 @@ export default function (api: any) {
         };
         if (leverage != null) payload.leverage = leverage;
         if (buyLimit != null) payload.buyLimit = buyLimit;
-        if (params.chainId != null) payload.chainId = params.chainId;
+        if (isLive) payload.chainId = liveChainId;
         if (params.simulationConfig) payload.simulationConfig = params.simulationConfig;
         if (params.strategy) payload.strategy = params.strategy;
         if (params.strategyDescription) payload.strategyDescription = params.strategyDescription;
@@ -1819,7 +1903,7 @@ export default function (api: any) {
           body.settlement_config = JSON.stringify({
             ...settlementConfig,
             symbol: params.symbol,
-            chain_id: params.chainId,
+            chain_id: liveChainId,
             protocol: params.protocol ?? "hyperliquid",
             buy_limit_usd: buyLimit,
           });
@@ -1855,16 +1939,15 @@ export default function (api: any) {
       if (isLive && params.masterWalletAddress && params.walletAddress) {
         try {
           const signedAt = Math.floor(Date.now() / 1000);
-          const settlementMarketType = params.marketType ?? "perp";
           const traderBody: Record<string, unknown> = {
             trader_id: agentId,
             owner: npub,
             eth_address: params.masterWalletAddress,
             agent_address: params.walletAddress,
             symbol: params.symbol!,
-            chain_id: params.chainId!,
-            market_type: settlementMarketType,
-            venue_type: settlementMarketType === "perp" ? "dex_orderbook" : "dex_amm",
+            chain_id: liveChainId!,
+            market_type: marketType,
+            venue_type: marketType === "perp" ? "dex_orderbook" : "dex_amm",
             buy_limit_usd: buyLimit!,
             signed_at: signedAt,
           };
@@ -2017,6 +2100,7 @@ export default function (api: any) {
       const { privateKey, publicKey } = loadKeys(pluginConfig);
       const npub = Nip19.npubEncode(publicKey);
       const auth = getAuthHeader(publicKey, privateKey);
+      const billingWallet = buildBillingWallet();
       const result: Record<string, unknown> = {};
       const signedAt = Math.floor(Date.now() / 1000);
       debugLog("delete_agent", "entry", { agentId: params.agentId });
@@ -2052,9 +2136,14 @@ export default function (api: any) {
         const signature = Signer.getSignature(sigData, privateKey, {
           agent_id: "number", action: "string", user: "string", timestamp: "number",
         } as const);
+        const billingHeaders = await buildBillingHeaders(billingWallet);
         const res = await fetch(`${baseUrl}/api/agent/${params.agentId}`, {
           method: "DELETE",
-          headers: { "Content-Type": "application/json", Authorization: auth },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: auth,
+            ...billingHeaders,
+          },
           body: JSON.stringify({ signature, timestamp: signedAt }),
         });
         debugLog("delete_agent", "trading-data.res", { status: res.status });
@@ -2065,8 +2154,17 @@ export default function (api: any) {
 
       // Step 3: Delete from trading-bot
       try {
+        const deleteSigData = { agent_id: params.agentId, signed_at: signedAt };
+        const signature = Signer.getSignature(deleteSigData, privateKey, {
+          agent_id: "number",
+          signed_at: "number",
+        } as const);
         const res = await fetch(`${tradingBotUrl}/agents/${params.agentId}?signed_at=${signedAt}`, {
           method: "DELETE",
+          headers: {
+            "x-public-key": publicKey,
+            "x-signature": signature,
+          },
         });
         debugLog("delete_agent", "trading-bot.res", { status: res.status });
         result.tradingBot = { ok: res.ok };

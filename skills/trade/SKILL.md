@@ -7,10 +7,18 @@ description: Create a paper or live trading agent. Use when the user wants to st
 
 Follow these steps to create a paper or live trading agent.
 
-## Step 1 — Ask trading mode
+## Step 1 — Ask trading mode and resolve market/network
 Ask the user: **paper** or **live** mode?
 - Paper: simulated trading, no real funds
 - Live: real trading on Hyperliquid (testnet or mainnet)
+
+Then resolve the missing choices before continuing:
+- If the user did not already specify a market type, ask: **spot** or **perp**?
+- If **live** and the user did not already specify a network, ask: **testnet** or **mainnet**?
+- Derive live `chainId` from the chosen network:
+  - testnet → `998`
+  - mainnet → `999`
+- Do not ask again if the user already gave the market type or live network in their original request.
 
 ## Step 2 — Initialize session
 Call `init_trading_session` with the chosen `mode`.
@@ -18,8 +26,8 @@ Call `init_trading_session` with the chosen `mode`.
 Handle the response:
 - **keys.generated = true**: Inform the user a new Nostr identity was created. Do not display the private key or nsec unless asked.
 - **access.hasAccess = false**: Do not stop. Tell the user they are not whitelisted, so agent creation will need the BSC billing flow: eligible NFT check, OSWAP funding, vault credit deposit, then agent creation.
-- **If live + wallets.wallets has entries**: Present the active wallets (name, walletAddress, masterWalletAddress, network). Ask which to reuse. Save the chosen `walletId`, `walletAddress`, and `masterWalletAddress`, then continue to Step 5.
-- **If live + no wallets**: Continue to Step 3.
+- **If live + wallets.wallets has entries**: Filter to the chosen network first, then present the active wallets (name, walletAddress, masterWalletAddress, network). Ask which to reuse. Save the chosen `walletId`, `walletAddress`, and `masterWalletAddress`, then continue to Step 5.
+- **If live + no wallets on the chosen network**: Continue to Step 3.
 - **If paper**: Skip to Step 5.
 
 Important:
@@ -83,7 +91,9 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 If `access.hasAccess = false`:
 - Explain that OpenClaw uses the configured `nostrPrivateKey` as the BSC/Ethereum signing key for NFT checks, OSWAP funding, vault credit deposit, and billing auth.
 - Explain that `prepare_agent_creation` automatically registers the derived billing wallet through `POST /api/auth/login` before billing checks.
-- Call `prepare_agent_creation` with `name`, `mode`, `marketType`, and `symbol`.
+- Call `prepare_agent_creation` with:
+  - Paper: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
+  - Live: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
 - Present the returned plan clearly:
   - whether an NFT mint is needed
   - how much OSWAP is required
@@ -100,7 +110,8 @@ Present a summary:
 - Agent name, trading pair, strategy name
 - Indicators, entry/exit rules, risk settings
 - Initial capital
-- If live: master wallet, agent wallet, leverage
+- If paper: market type
+- If live: network, `chainId`, master wallet, agent wallet, leverage
 - If not whitelisted: include the `prepare_agent_creation` billing summary
 
 Ask the user to confirm. Do NOT proceed until they explicitly confirm.
@@ -110,7 +121,11 @@ Call `deploy_agent` with:
 - `name`, `strategy`, `mode`
 - Paper: `initialCapital`, `marketType` (spot/perp), `simulationConfig` — defaults: spot → `{"asset_type":"crypto","protocol":"uniswap","chain_id":1}`, perp → `{"asset_type":"crypto","protocol":"hyperliquid","chain_id":998}`, stocks → `{"asset_type":"stocks"}`
 - If perp: `leverage` (same as `strategy.risk_manager.leverage`)
-- Live: `marketType: "perp"`, `leverage`, `walletId`, `walletAddress`, `masterWalletAddress`, `symbol`, `protocol: "hyperliquid"`, `chainId` (do NOT pass `initialCapital` — it is auto-fetched from wallet balance)
+- Live: chosen `marketType`, `leverage`, `walletId`, `walletAddress`, `masterWalletAddress`, `symbol`, `protocol: "hyperliquid"`, and the derived live `chainId` (do NOT pass `initialCapital` — it is auto-fetched from wallet balance)
+
+Important:
+- Do **not** pass top-level `chainId` for paper mode.
+- Do **not** rely on a default live `chainId`; always pass the derived value from the user’s chosen network.
 
 Handle the response:
 - **create.ok = false**: Report error and STOP.
