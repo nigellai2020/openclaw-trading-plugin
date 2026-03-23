@@ -80,10 +80,6 @@
         "type": "number",
         "default": 110
       },
-      "bscInitialVaultCredit": {
-        "type": "number",
-        "default": 100
-      },
       "billingSwapSlippageBps": {
         "type": "number",
         "default": 50

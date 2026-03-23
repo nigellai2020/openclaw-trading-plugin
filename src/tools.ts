@@ -117,7 +117,6 @@ const DEFAULT_ELIGIBLE_NFT_NAME = "Troll NFT";
 const DEFAULT_ELIGIBLE_NFT_MINIMUM_STAKE = 100;
 const DEFAULT_ELIGIBLE_NFT_PROTOCOL_FEE = 10;
 const DEFAULT_ELIGIBLE_NFT_TOTAL_MINTING_FEE = 110;
-const DEFAULT_INITIAL_VAULT_CREDIT = 100;
 const DEFAULT_BILLING_SWAP_SLIPPAGE_BPS = 50;
 const DEFAULT_BILLING_POLL_INTERVAL_MS = 5_000;
 const DEFAULT_BILLING_POLL_TIMEOUT_MS = 90_000;
@@ -160,7 +159,6 @@ type BillingEvmConfig = {
   eligibleNftMinimumStake: number;
   eligibleNftProtocolFee: number;
   eligibleNftTotalMintingFee: number;
-  initialVaultCredit: number;
   swapSlippageBps: number;
   balancePollIntervalMs: number;
   balancePollTimeoutMs: number;
@@ -345,7 +343,6 @@ function buildBillingEvmConfig(pluginConfig: any): BillingEvmConfig {
     eligibleNftMinimumStake: pluginConfig.bscEligibleNftMinimumStake ?? DEFAULT_ELIGIBLE_NFT_MINIMUM_STAKE,
     eligibleNftProtocolFee: pluginConfig.bscEligibleNftProtocolFee ?? DEFAULT_ELIGIBLE_NFT_PROTOCOL_FEE,
     eligibleNftTotalMintingFee: pluginConfig.bscEligibleNftTotalMintingFee ?? DEFAULT_ELIGIBLE_NFT_TOTAL_MINTING_FEE,
-    initialVaultCredit: pluginConfig.bscInitialVaultCredit ?? DEFAULT_INITIAL_VAULT_CREDIT,
     swapSlippageBps: pluginConfig.billingSwapSlippageBps ?? DEFAULT_BILLING_SWAP_SLIPPAGE_BPS,
     balancePollIntervalMs: pluginConfig.billingPollIntervalMs ?? DEFAULT_BILLING_POLL_INTERVAL_MS,
     balancePollTimeoutMs: pluginConfig.billingPollTimeoutMs ?? DEFAULT_BILLING_POLL_TIMEOUT_MS,
@@ -701,7 +698,6 @@ export default function (api: any) {
   }): Promise<PreparedAgentCreationContext> {
     const mode = input.mode ?? "paper";
     const marketType = input.marketType ?? "spot";
-    const targetVaultCreditRaw = parseTokenAmount(billingEvmConfig.initialVaultCredit, billingEvmConfig.tokenDecimals);
     const eligibleOptions = [{
       name: billingEvmConfig.eligibleNftName,
       contractAddress: billingEvmConfig.eligibleNftAddress,
@@ -737,7 +733,7 @@ export default function (api: any) {
             strategyFee: "0",
             firstBillingAmount: "0",
             existingVaultCredit: "0",
-            targetVaultCredit: formatAmount(targetVaultCreditRaw, billingEvmConfig.tokenDecimals),
+            targetVaultCredit: "0",
             oswapForNft: "0",
             oswapForInitialVaultCredit: "0",
             requiredOswap: "0",
@@ -760,7 +756,7 @@ export default function (api: any) {
         strategyFeeRaw: 0n,
         firstBillingAmountRaw: 0n,
         existingVaultCreditRaw: 0n,
-        targetVaultCreditRaw,
+        targetVaultCreditRaw: 0n,
         oswapForNftRaw: 0n,
         oswapForInitialVaultCreditRaw: 0n,
         requiredOswapRaw: 0n,
@@ -810,11 +806,7 @@ export default function (api: any) {
     const protocolFeeRaw = feeQuote.protocolFeeRaw;
     const strategyFeeRaw = feeQuote.strategyFeeRaw;
     const firstBillingAmountRaw = operatingFeeRaw + protocolFeeRaw + strategyFeeRaw;
-    if (firstBillingAmountRaw > targetVaultCreditRaw) {
-      throw new Error(
-        `Configured initial vault credit (${formatAmount(targetVaultCreditRaw, billingEvmConfig.tokenDecimals)} ${billingEvmConfig.tokenSymbol}) is below the first billing amount (${formatAmount(firstBillingAmountRaw, billingEvmConfig.tokenDecimals)} ${billingEvmConfig.tokenSymbol})`,
-      );
-    }
+    const targetVaultCreditRaw = firstBillingAmountRaw;
 
     const walletOswapBalanceRaw = BigInt(rawOswapBalance.toString());
     const walletBnbBalanceRaw = BigInt(rawBnbBalance.toString());
@@ -951,7 +943,7 @@ export default function (api: any) {
         oswapForInitialVaultCredit: formatAmount(oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
         requiredOswap: formatAmount(requiredOswapRaw, billingEvmConfig.tokenDecimals),
         oswapShortfall: formatAmount(oswapShortfallRaw, billingEvmConfig.tokenDecimals),
-        note: `Vault deposits become billable ${feeQuote.tokenSymbol} credit. The initial deposit target is ${formatAmount(targetVaultCreditRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol}, and the first billing amount is ${formatAmount(firstBillingAmountRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} every ${Math.round(feeQuote.periodSeconds / 86_400)} days.`,
+        note: `Vault deposits become billable ${feeQuote.tokenSymbol} credit. The initial deposit target equals the first billing amount: ${formatAmount(firstBillingAmountRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} every ${Math.round(feeQuote.periodSeconds / 86_400)} days.`,
       },
       funding: {
         bnbForSwapQuoted: formatAmount(bnbForSwapQuotedRaw, 18, 8),
