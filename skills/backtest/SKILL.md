@@ -10,7 +10,7 @@ Follow these steps to run a backtest.
 ## Step 1 — Initialize session
 Call `init_trading_session` with mode `"paper"`. Handle the response:
 - **keys.generated = true**: Inform the user a new Nostr identity was created.
-- **access.hasAccess = false**: Ask for their wallet address, call `request_trading_access`, and tell them an admin must approve at https://agent.openswap.xyz/admin/waitlist. STOP here.
+- **access.hasAccess = false**: Inform the user they are not whitelisted for direct agent creation, but continue. Backtesting does not need the NFT/vault billing setup.
 
 ## Step 2 — Identify the agent
 If the user specified an agent ID, use it. Otherwise ask the user for the agent ID. Call `get_agent` to fetch the agent details (name, strategy, capital).

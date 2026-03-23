@@ -2,6 +2,9 @@
   "name": "trading-plugin",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "test:billing-flow": "node scripts/billing-flow-test.cjs"
+  },
   "openclaw": {
     "extensions": [
       "./src/tools.ts"
@@ -9,6 +12,7 @@
   },
   "dependencies": {
     "@scom/scom-signer": "^0.1.2",
+    "ethers": "^6.16.0",
     "mqtt": "^5.10.0"
   },
   "devDependencies": {

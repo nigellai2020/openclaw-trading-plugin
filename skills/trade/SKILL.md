@@ -17,10 +17,13 @@ Call `init_trading_session` with the chosen `mode`.
 
 Handle the response:
 - **keys.generated = true**: Inform the user a new Nostr identity was created. Do not display the private key or nsec unless asked.
-- **access.hasAccess = false**: Ask for their wallet address, call `request_trading_access`, and tell them an admin must approve at https://agent.openswap.xyz/admin/waitlist. STOP here.
-- **If live + wallets.wallets has entries**: Present the active wallets (name, walletAddress, masterWalletAddress, network). Ask which to reuse. Save the chosen `walletId`, `walletAddress`, and `masterWalletAddress`, then **skip to Step 5**.
+- **access.hasAccess = false**: Do not stop. Tell the user they are not whitelisted, so agent creation will need the BSC billing flow: eligible NFT check, OSWAP funding, vault credit deposit, then agent creation.
+- **If live + wallets.wallets has entries**: Present the active wallets (name, walletAddress, masterWalletAddress, network). Ask which to reuse. Save the chosen `walletId`, `walletAddress`, and `masterWalletAddress`, then continue to Step 5.
 - **If live + no wallets**: Continue to Step 3.
 - **If paper**: Skip to Step 5.
+
+Important:
+- `init_trading_session` may return early when `access.hasAccess = false`, so for live mode you may need to call `list_wallets` separately before deciding whether to reuse an existing wallet.
 
 ## Step 3 (live only) — Create API wallet on Hyperliquid
 Ask the user if they already have a Hyperliquid API wallet private key.
@@ -44,6 +47,8 @@ Handle the response:
 - Save `teeStorage.agentWalletAddress`, `registration.walletId`, and `registration.walletAddress`.
 
 ## Step 5 — Build strategy
+Ask the user for an agent name if they have not already provided one.
+
 Ask the user what trading strategy they want. Construct a strategy object with:
 - **indicators**: technical indicators with type, name, period, timeframe, and params
 - **rules**: entry (intent:"open") and exit (intent:"close") rules with conditions and order specs
@@ -74,16 +79,33 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 - **Live**: `deploy_agent` auto-fetches the wallet balance as initial capital. **Do NOT ask the user for initial capital in live mode.** Do NOT call `get_hyperliquid_balance` separately — the deploy step handles it.
 - **Paper**: Ask the user for their desired initial capital.
 
-## Step 7 — Confirm before creating
+## Step 7 — Run billing preflight for non-whitelisted users
+If `access.hasAccess = false`:
+- Explain that OpenClaw uses the configured `nostrPrivateKey` as the BSC/Ethereum signing key for NFT checks, OSWAP funding, vault credit deposit, and billing auth.
+- Explain that `prepare_agent_creation` automatically registers the derived billing wallet through `POST /api/auth/login` before billing checks.
+- Call `prepare_agent_creation` with `name`, `mode`, `marketType`, and `symbol`.
+- Present the returned plan clearly:
+  - whether an NFT mint is needed
+  - how much OSWAP is required
+  - how much BNB is required for swap + gas
+  - what approvals will happen
+  - how much goes into the vault
+  - that the vault deposit becomes billable credit, not a one-time burn
+- If `prepare_agent_creation` reports an `error`, STOP and explain it.
+
+If `access.hasAccess = true`, skip this step.
+
+## Step 8 — Confirm before creating
 Present a summary:
 - Agent name, trading pair, strategy name
 - Indicators, entry/exit rules, risk settings
 - Initial capital
 - If live: master wallet, agent wallet, leverage
+- If not whitelisted: include the `prepare_agent_creation` billing summary
 
 Ask the user to confirm. Do NOT proceed until they explicitly confirm.
 
-## Step 8 — Deploy agent
+## Step 9 — Deploy agent
 Call `deploy_agent` with:
 - `name`, `strategy`, `mode`
 - Paper: `initialCapital`, `marketType` (spot/perp), `simulationConfig` — defaults: spot → `{"asset_type":"crypto","protocol":"uniswap","chain_id":1}`, perp → `{"asset_type":"crypto","protocol":"hyperliquid","chain_id":998}`, stocks → `{"asset_type":"stocks"}`
@@ -92,6 +114,11 @@ Call `deploy_agent` with:
 
 Handle the response:
 - **create.ok = false**: Report error and STOP.
+- **billing.required = true**: Present the billing execution result:
+  - NFT minted or existing NFT verified
+  - vault deposit amount and updated vault credit
+  - fee breakdown
+  - next billing date estimate
 - **notify.ok = false**: Warn but continue.
 - **registerTrader.ok = false** (live): Warn that settlement registration failed — agent may not trade.
 - Present: agent ID, name, pair, capital, and `create.agentUrl`.

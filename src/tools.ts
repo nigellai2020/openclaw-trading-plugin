@@ -1,5 +1,13 @@
 import { Type } from "@sinclair/typebox";
 import { Keys, Nip19, Signer, Crypto } from "@scom/scom-signer";
+import {
+  Contract,
+  JsonRpcProvider,
+  Wallet,
+  formatUnits,
+  getAddress,
+  parseUnits,
+} from "ethers";
 import mqtt from "mqtt";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -98,6 +106,288 @@ const DEFAULT_WALLET_AGENT_URL =
   "https://wallet-agent.decom.dev";
 const DEFAULT_SETTLEMENT_ENGINE_URL =
   "https://settlement-agent.decom.dev";
+const DEFAULT_BSC_BILLING_RPC_URL = "https://data-seed-prebsc-1-s1.binance.org:8545";
+const DEFAULT_BSC_ROUTER_ADDRESS = "0x8AEb7abBCfe0ED8baAfa3ddD2CdE39cDBb4d0106";
+const DEFAULT_BSC_WETH_ADDRESS = "0xae13d989dac2f0debff460ac112a837c89baa7cd";
+const DEFAULT_OSWAP_TOKEN_ADDRESS = "0x45eee762aaeA4e5ce317471BDa8782724972Ee19";
+const DEFAULT_BSC_VAULT_ADDRESS = "0x15780a63c8a47dd27c4c7f7d17673929e0cb4d05";
+const DEFAULT_ELIGIBLE_NFT_ADDRESS = "0xc32c70c6cc2338daa3fdfbb25c98f1227c673175";
+const DEFAULT_ELIGIBLE_NFT_EXPLORER_URL = "https://testnet.bscscan.com/address/0xc32c70c6cc2338daa3fdfbb25c98f1227c673175";
+const DEFAULT_ELIGIBLE_NFT_NAME = "Troll NFT";
+const DEFAULT_ELIGIBLE_NFT_MINIMUM_STAKE = 100;
+const DEFAULT_ELIGIBLE_NFT_PROTOCOL_FEE = 10;
+const DEFAULT_ELIGIBLE_NFT_TOTAL_MINTING_FEE = 110;
+const DEFAULT_INITIAL_VAULT_CREDIT = 100;
+const DEFAULT_BILLING_SWAP_SLIPPAGE_BPS = 50;
+const DEFAULT_BILLING_POLL_INTERVAL_MS = 5_000;
+const DEFAULT_BILLING_POLL_TIMEOUT_MS = 90_000;
+const DEFAULT_FALLBACK_SWAP_GAS = 250_000n;
+const DEFAULT_FALLBACK_APPROVE_GAS = 70_000n;
+const DEFAULT_FALLBACK_NFT_STAKE_GAS = 300_000n;
+const DEFAULT_FALLBACK_VAULT_DEPOSIT_GAS = 220_000n;
+
+const ERC20_ABI = [
+  "function balanceOf(address owner) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+];
+
+const NFT_ABI = [
+  "function balanceOf(address owner) view returns (uint256)",
+  "function stake(uint256 amount)",
+];
+
+const VAULT_ABI = [
+  "function deposit(address beneficiary, uint256 amount)",
+];
+
+const ROUTER_ABI = [
+  "function getAmountsIn(uint256 amountOut, address[] memory path) view returns (uint256[] memory amounts)",
+  "function swapETHForExactTokens(uint256 amountOut, address[] calldata path, address to, uint256 deadline) payable returns (uint256[] memory amounts)",
+];
+
+type BillingEvmConfig = {
+  rpcUrl: string;
+  routerAddress: string;
+  wethAddress: string;
+  tokenAddress: string;
+  tokenSymbol: string;
+  tokenDecimals: number;
+  vaultAddress: string;
+  eligibleNftAddress: string;
+  eligibleNftExplorerUrl: string;
+  eligibleNftName: string;
+  eligibleNftMinimumStake: number;
+  eligibleNftProtocolFee: number;
+  eligibleNftTotalMintingFee: number;
+  initialVaultCredit: number;
+  swapSlippageBps: number;
+  balancePollIntervalMs: number;
+  balancePollTimeoutMs: number;
+};
+
+type EthHeaders = {
+  "x-eth-message": string;
+  "x-eth-signature": string;
+};
+
+type GasEstimateSummary = {
+  required: boolean;
+  gasUnits: string;
+  costBnb: string;
+  source: "rpc" | "fallback" | "skipped";
+};
+
+type PreparedAgentCreationResult = {
+  access: {
+    npub: string;
+    publicKey: string;
+    isWhitelisted: boolean;
+    canSkipNftPurchase: boolean;
+  };
+  wallet: {
+    address?: string;
+    oswapBalance?: string;
+    bnbBalance?: string;
+    usesNostrPrivateKey: boolean;
+  };
+  nft: {
+    required: boolean;
+    hasEligibleNft: boolean;
+    eligibleOptions: Array<{
+      name: string;
+      contractAddress: string;
+      explorerUrl: string;
+      minimumStake: string;
+      protocolFee: string;
+      totalMintingFee: string;
+    }>;
+  };
+  fees: {
+    operatingFee: string;
+    protocolFee: string;
+    strategyFee: string;
+    firstBillingAmount: string;
+    existingVaultCredit: string;
+    targetVaultCredit: string;
+    oswapForNft: string;
+    oswapForInitialVaultCredit: string;
+    requiredOswap: string;
+    oswapShortfall: string;
+    note: string;
+  };
+  funding?: {
+    bnbForSwapQuoted: string;
+    bnbForSwapMax: string;
+    bnbForGas: string;
+    totalBnbNeeded: string;
+    bnbShortfall: string;
+  };
+  approvals?: {
+    nftApprovalRequired: boolean;
+    vaultApprovalRequired: boolean;
+  };
+  gas?: {
+    gasPriceWei: string;
+    gasPriceGwei: string;
+    steps: {
+      swap: GasEstimateSummary;
+      nftApproval: GasEstimateSummary;
+      nftMint: GasEstimateSummary;
+      vaultApproval: GasEstimateSummary;
+      vaultDeposit: GasEstimateSummary;
+    };
+  };
+  executionPlan: {
+    agentName: string;
+    mode: string;
+    marketType: string;
+    symbol: string | null;
+    actions: string[];
+    approvals: string[];
+    depositToVault: string;
+  };
+};
+
+type PreparedAgentCreationContext = {
+  prepared: PreparedAgentCreationResult;
+  billingWallet?: Wallet;
+  operatingFeeRaw: bigint;
+  protocolFeeRaw: bigint;
+  strategyFeeRaw: bigint;
+  firstBillingAmountRaw: bigint;
+  existingVaultCreditRaw: bigint;
+  targetVaultCreditRaw: bigint;
+  oswapForNftRaw: bigint;
+  oswapForInitialVaultCreditRaw: bigint;
+  requiredOswapRaw: bigint;
+  oswapShortfallRaw: bigint;
+  walletOswapBalanceRaw: bigint;
+  walletBnbBalanceRaw: bigint;
+  bnbForSwapQuotedRaw: bigint;
+  bnbForSwapMaxRaw: bigint;
+  bnbForGasRaw: bigint;
+  totalBnbNeededRaw: bigint;
+  bnbShortfallRaw: bigint;
+  gasPriceWei: bigint;
+  hasEligibleNft: boolean;
+  nftApprovalRequired: boolean;
+  vaultApprovalRequired: boolean;
+  billingPeriodSeconds: number;
+};
+
+function normalizeHexPrivateKey(privateKey: string): string {
+  return privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`;
+}
+
+function trimAmount(value: string, maxDecimals = 6): string {
+  if (!value.includes(".")) return value;
+  const [whole, fraction] = value.split(".");
+  const trimmed = fraction.slice(0, maxDecimals).replace(/0+$/, "");
+  return trimmed ? `${whole}.${trimmed}` : whole;
+}
+
+function formatAmount(raw: bigint, decimals: number, maxDecimals = 6): string {
+  return trimAmount(formatUnits(raw, decimals), maxDecimals);
+}
+
+function parseTokenAmount(raw: string | number, decimals: number): bigint {
+  return parseUnits(String(raw), decimals);
+}
+
+function maxBigInt(a: bigint, b: bigint): bigint {
+  return a > b ? a : b;
+}
+
+function minBigInt(a: bigint, b: bigint): bigint {
+  return a < b ? a : b;
+}
+
+function computeAmountInMax(quotedIn: bigint, slippageBps: number): bigint {
+  return (quotedIn * BigInt(10_000 + slippageBps)) / 10_000n;
+}
+
+function makeBillingAccessMessage(walletAddress: string, timestamp: number): string {
+  return `Billing engine access; wallet: ${walletAddress}; timestamp: ${timestamp}`;
+}
+
+function makeBillingWalletLoginMessage(npub: string, timestamp: number): string {
+  return `OSWap login npub: ${npub} timestamp: ${timestamp}`;
+}
+
+function sanitizeForLog(data: unknown): unknown {
+  const secretPattern = /(privatekey|signature|authorization|encrypted_private_key|ethmessage|message)/i;
+  if (data == null) return data;
+  if (Array.isArray(data)) return data.map((item) => sanitizeForLog(item));
+  if (typeof data === "object") {
+    return Object.fromEntries(
+      Object.entries(data as Record<string, unknown>).map(([key, value]) => {
+        if (secretPattern.test(key)) return [key, "[REDACTED]"];
+        return [key, sanitizeForLog(value)];
+      }),
+    );
+  }
+  return data;
+}
+
+function buildBillingEvmConfig(pluginConfig: any): BillingEvmConfig {
+  return {
+    rpcUrl: pluginConfig.bscBillingRpcUrl ?? DEFAULT_BSC_BILLING_RPC_URL,
+    routerAddress: pluginConfig.bscBillingRouterAddress ?? DEFAULT_BSC_ROUTER_ADDRESS,
+    wethAddress: pluginConfig.bscBillingWethAddress ?? DEFAULT_BSC_WETH_ADDRESS,
+    tokenAddress: pluginConfig.bscBillingTokenAddress ?? DEFAULT_OSWAP_TOKEN_ADDRESS,
+    tokenSymbol: pluginConfig.bscBillingTokenSymbol ?? "OSWAP",
+    tokenDecimals: pluginConfig.bscBillingTokenDecimals ?? 18,
+    vaultAddress: pluginConfig.bscBillingVaultAddress ?? DEFAULT_BSC_VAULT_ADDRESS,
+    eligibleNftAddress: pluginConfig.bscEligibleNftAddress ?? DEFAULT_ELIGIBLE_NFT_ADDRESS,
+    eligibleNftExplorerUrl: pluginConfig.bscEligibleNftExplorerUrl ?? DEFAULT_ELIGIBLE_NFT_EXPLORER_URL,
+    eligibleNftName: pluginConfig.bscEligibleNftName ?? DEFAULT_ELIGIBLE_NFT_NAME,
+    eligibleNftMinimumStake: pluginConfig.bscEligibleNftMinimumStake ?? DEFAULT_ELIGIBLE_NFT_MINIMUM_STAKE,
+    eligibleNftProtocolFee: pluginConfig.bscEligibleNftProtocolFee ?? DEFAULT_ELIGIBLE_NFT_PROTOCOL_FEE,
+    eligibleNftTotalMintingFee: pluginConfig.bscEligibleNftTotalMintingFee ?? DEFAULT_ELIGIBLE_NFT_TOTAL_MINTING_FEE,
+    initialVaultCredit: pluginConfig.bscInitialVaultCredit ?? DEFAULT_INITIAL_VAULT_CREDIT,
+    swapSlippageBps: pluginConfig.billingSwapSlippageBps ?? DEFAULT_BILLING_SWAP_SLIPPAGE_BPS,
+    balancePollIntervalMs: pluginConfig.billingPollIntervalMs ?? DEFAULT_BILLING_POLL_INTERVAL_MS,
+    balancePollTimeoutMs: pluginConfig.billingPollTimeoutMs ?? DEFAULT_BILLING_POLL_TIMEOUT_MS,
+  };
+}
+
+async function estimateStepCost(
+  gasEstimator: () => Promise<bigint>,
+  gasPriceWei: bigint,
+  fallbackGas: bigint,
+  required: boolean,
+): Promise<GasEstimateSummary> {
+  if (!required) {
+    return {
+      required: false,
+      gasUnits: "0",
+      costBnb: "0",
+      source: "skipped",
+    };
+  }
+
+  try {
+    const gasUnits = await gasEstimator();
+    return {
+      required: true,
+      gasUnits: gasUnits.toString(),
+      costBnb: formatAmount(gasUnits * gasPriceWei, 18, 8),
+      source: "rpc",
+    };
+  } catch {
+    return {
+      required: true,
+      gasUnits: fallbackGas.toString(),
+      costBnb: formatAmount(fallbackGas * gasPriceWei, 18, 8),
+      source: "fallback",
+    };
+  }
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function loadKeys(config: any): {
   privateKey: string;
@@ -191,6 +481,8 @@ export default function (api: any) {
   const backtestEngineUrl: string = pluginConfig.backtestEngineUrl ?? DEFAULT_BACKTEST_ENGINE_URL;
   const walletAgentUrl: string = pluginConfig.walletAgentUrl ?? DEFAULT_WALLET_AGENT_URL;
   const settlementEngineUrl: string = pluginConfig.settlementEngineUrl ?? DEFAULT_SETTLEMENT_ENGINE_URL;
+  const billingEvmConfig = buildBillingEvmConfig(pluginConfig);
+  const billingProvider = new JsonRpcProvider(billingEvmConfig.rpcUrl);
 
   // ── Debug logger ───────────────────────────────────────────────
   const debugLogPath = path.join(os.homedir(), ".openclaw", "logs", "trading-debug.json");
@@ -198,9 +490,549 @@ export default function (api: any) {
   function debugLog(tool: string, step: string, data: unknown) {
     try {
       fs.mkdirSync(path.dirname(debugLogPath), { recursive: true });
-      const entry = { ts: new Date().toISOString(), tool, step, data };
+      const entry = { ts: new Date().toISOString(), tool, step, data: sanitizeForLog(data) };
       fs.appendFileSync(debugLogPath, JSON.stringify(entry) + "\n");
     } catch {}
+  }
+
+  function extractApiData<T = any>(body: any): T {
+    return (body?.data ?? body) as T;
+  }
+
+  function responseErrorMessage(body: any): string {
+    if (typeof body === "string") return body;
+    if (typeof body?.error === "string") return body.error;
+    if (typeof body?.message === "string") return body.message;
+    if (typeof body?.data?.error === "string") return body.data.error;
+    if (typeof body?.data?.message === "string") return body.data.message;
+    return JSON.stringify(body ?? {});
+  }
+
+  function isWalletNotRegisteredError(status: number, body: any): boolean {
+    const message = responseErrorMessage(body).toLowerCase();
+    return (status === 403 || status === 404) && (
+      message.includes("wallet not registered") ||
+      message.includes("wallet_address not found") ||
+      message.includes("wallet address not found") ||
+      message.includes("user not found")
+    );
+  }
+
+  function buildBillingWallet(): Wallet {
+    const privateKey = pluginConfig.nostrPrivateKey;
+    if (!privateKey) {
+      throw new Error("nostrPrivateKey is required for billing wallet access");
+    }
+    return new Wallet(normalizeHexPrivateKey(privateKey), billingProvider);
+  }
+
+  async function buildBillingHeaders(wallet: Wallet): Promise<EthHeaders> {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const message = makeBillingAccessMessage(wallet.address, timestamp);
+    const signature = await wallet.signMessage(message);
+    return {
+      "x-eth-message": message,
+      "x-eth-signature": signature,
+    };
+  }
+
+  async function billingFetch(
+    url: string,
+    wallet: Wallet,
+    options?: RequestInit,
+  ): Promise<{ res: Response; body: any }> {
+    const billingHeaders = await buildBillingHeaders(wallet);
+    const optionHeaders = options?.headers instanceof Headers
+      ? Object.fromEntries(options.headers.entries())
+      : Array.isArray(options?.headers)
+        ? Object.fromEntries(options.headers)
+        : { ...((options?.headers as Record<string, string> | undefined) ?? {}) };
+    const headers: Record<string, string> = {
+      ...optionHeaders,
+      ...billingHeaders,
+    };
+    const res = await fetch(url, { ...options, headers });
+    const body = await res.json().catch(async () => await res.text().catch(() => null));
+    return { res, body };
+  }
+
+  async function ensureBillingWalletRegistered(input: {
+    npub: string;
+    publicKey: string;
+    privateKey: string;
+    wallet: Wallet;
+  }): Promise<{ walletAddress: string; inserted: boolean }> {
+    const url = `${baseUrl}/api/auth/login`;
+    const timestamp = Math.floor(Date.now() / 1000);
+    const ethMessage = makeBillingWalletLoginMessage(input.npub, timestamp);
+    const ethSignature = await input.wallet.signMessage(ethMessage);
+    const authorization = getAuthHeader(input.publicKey, input.privateKey);
+
+    debugLog("billing", "api.req /api/auth/login", {
+      url,
+      npub: input.npub,
+      walletAddress: input.wallet.address,
+      authorization,
+      "x-eth-message": ethMessage,
+      "x-eth-signature": ethSignature,
+    });
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: authorization,
+        "x-eth-message": ethMessage,
+        "x-eth-signature": ethSignature,
+      },
+    });
+    const body = await res.json().catch(async () => await res.text().catch(() => null));
+    debugLog("billing", "api.res /api/auth/login", {
+      status: res.status,
+      body,
+      npub: input.npub,
+      walletAddress: input.wallet.address,
+    });
+    if (!res.ok) {
+      throw new Error(`auth/login failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+
+    const data = extractApiData<any>(body) ?? {};
+    const registeredWalletAddress = data.walletAddress
+      ? getAddress(String(data.walletAddress))
+      : input.wallet.address;
+    if (registeredWalletAddress.toLowerCase() !== input.wallet.address.toLowerCase()) {
+      throw new Error(
+        `auth/login returned billing wallet ${registeredWalletAddress}, expected ${input.wallet.address}`,
+      );
+    }
+
+    return {
+      walletAddress: registeredWalletAddress,
+      inserted: Boolean(data.inserted),
+    };
+  }
+
+  async function fetchWhitelistStatus(npub: string): Promise<boolean> {
+    const whitelistUrl = `${baseUrl}/api/is-whitelisted/${npub}`;
+    debugLog("billing", "api.req /api/is-whitelisted", { url: whitelistUrl, npub });
+    const res = await fetch(whitelistUrl);
+    const body = await res.json().catch(async () => await res.text().catch(() => null));
+    debugLog("billing", "api.res /api/is-whitelisted", { status: res.status, body });
+    if (!res.ok) {
+      throw new Error(`whitelist check failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+    return Boolean(extractApiData(body)?.isWhitelisted);
+  }
+
+  async function fetchBillingFeeQuote(): Promise<{
+    periodSeconds: number;
+    operatingFeeRaw: bigint;
+    protocolFeeRaw: bigint;
+    strategyFeeRaw: bigint;
+    tokenSymbol: string;
+  }> {
+    const url = `${baseUrl}/api/billing-fee`;
+    debugLog("billing", "api.req /api/billing-fee", { url });
+    const res = await fetch(url);
+    const body = await res.json().catch(async () => await res.text().catch(() => null));
+    debugLog("billing", "api.res /api/billing-fee", { status: res.status, body });
+    if (!res.ok) {
+      throw new Error(`billing-fee failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+    const data = extractApiData<any>(body) ?? {};
+    return {
+      periodSeconds: Number(data.period ?? 2_592_000),
+      operatingFeeRaw: parseTokenAmount(data.operating_fee_per_period ?? 0, billingEvmConfig.tokenDecimals),
+      protocolFeeRaw: parseTokenAmount(data.protocol_fee_per_period ?? 0, billingEvmConfig.tokenDecimals),
+      strategyFeeRaw: parseTokenAmount(data.strategy_fee_per_period ?? 0, billingEvmConfig.tokenDecimals),
+      tokenSymbol: data.token_symbol ?? billingEvmConfig.tokenSymbol,
+    };
+  }
+
+  async function fetchBillingBalanceSnapshot(wallet: Wallet): Promise<{
+    availableBalanceRaw: bigint;
+    pendingWithdrawalBalanceRaw: bigint;
+    walletRegistered: boolean;
+  }> {
+    const url = `${baseUrl}/api/balance`;
+    debugLog("billing", "api.req /api/balance", { url, walletAddress: wallet.address });
+    const { res, body } = await billingFetch(url, wallet);
+    debugLog("billing", "api.res /api/balance", { status: res.status, body, walletAddress: wallet.address });
+    if (isWalletNotRegisteredError(res.status, body)) {
+      return {
+        availableBalanceRaw: 0n,
+        pendingWithdrawalBalanceRaw: 0n,
+        walletRegistered: false,
+      };
+    }
+    if (!res.ok) {
+      throw new Error(`billing balance failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+    const data = extractApiData<any>(body) ?? {};
+    return {
+      availableBalanceRaw: parseTokenAmount(data.available_balance ?? 0, billingEvmConfig.tokenDecimals),
+      pendingWithdrawalBalanceRaw: parseTokenAmount(data.pending_withdrawal_balance ?? 0, billingEvmConfig.tokenDecimals),
+      walletRegistered: true,
+    };
+  }
+
+  async function fetchBillingSubscriptions(wallet: Wallet): Promise<any[]> {
+    const url = `${baseUrl}/api/billing-subscriptions`;
+    debugLog("billing", "api.req /api/billing-subscriptions", { url, walletAddress: wallet.address });
+    const { res, body } = await billingFetch(url, wallet);
+    debugLog("billing", "api.res /api/billing-subscriptions", { status: res.status, body, walletAddress: wallet.address });
+    if (isWalletNotRegisteredError(res.status, body)) {
+      return [];
+    }
+    if (!res.ok) {
+      throw new Error(`billing-subscriptions failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+    const data = extractApiData<any>(body);
+    return Array.isArray(data) ? data : [];
+  }
+
+  async function prepareAgentCreationContext(input: {
+    name: string;
+    mode?: string;
+    marketType?: string;
+    symbol?: string;
+    npub: string;
+    publicKey: string;
+    privateKey: string;
+  }): Promise<PreparedAgentCreationContext> {
+    const mode = input.mode ?? "paper";
+    const marketType = input.marketType ?? "spot";
+    const targetVaultCreditRaw = parseTokenAmount(billingEvmConfig.initialVaultCredit, billingEvmConfig.tokenDecimals);
+    const eligibleOptions = [{
+      name: billingEvmConfig.eligibleNftName,
+      contractAddress: billingEvmConfig.eligibleNftAddress,
+      explorerUrl: billingEvmConfig.eligibleNftExplorerUrl,
+      minimumStake: String(billingEvmConfig.eligibleNftMinimumStake),
+      protocolFee: String(billingEvmConfig.eligibleNftProtocolFee),
+      totalMintingFee: String(billingEvmConfig.eligibleNftTotalMintingFee),
+    }];
+
+    const isWhitelisted = await fetchWhitelistStatus(input.npub);
+    if (isWhitelisted) {
+      const billingWallet = buildBillingWallet();
+      return {
+        prepared: {
+          access: {
+            npub: input.npub,
+            publicKey: input.publicKey,
+            isWhitelisted: true,
+            canSkipNftPurchase: true,
+          },
+          wallet: {
+            address: billingWallet.address,
+            usesNostrPrivateKey: true,
+          },
+          nft: {
+            required: false,
+            hasEligibleNft: false,
+            eligibleOptions,
+          },
+          fees: {
+            operatingFee: "0",
+            protocolFee: "0",
+            strategyFee: "0",
+            firstBillingAmount: "0",
+            existingVaultCredit: "0",
+            targetVaultCredit: formatAmount(targetVaultCreditRaw, billingEvmConfig.tokenDecimals),
+            oswapForNft: "0",
+            oswapForInitialVaultCredit: "0",
+            requiredOswap: "0",
+            oswapShortfall: "0",
+            note: "Whitelisted access bypasses NFT purchase and vault funding.",
+          },
+          executionPlan: {
+            agentName: input.name,
+            mode,
+            marketType,
+            symbol: input.symbol ?? null,
+            actions: [`Create ${mode} ${marketType} agent directly using whitelist access.`],
+            approvals: [],
+            depositToVault: "0",
+          },
+        },
+        billingWallet,
+        operatingFeeRaw: 0n,
+        protocolFeeRaw: 0n,
+        strategyFeeRaw: 0n,
+        firstBillingAmountRaw: 0n,
+        existingVaultCreditRaw: 0n,
+        targetVaultCreditRaw,
+        oswapForNftRaw: 0n,
+        oswapForInitialVaultCreditRaw: 0n,
+        requiredOswapRaw: 0n,
+        oswapShortfallRaw: 0n,
+        walletOswapBalanceRaw: 0n,
+        walletBnbBalanceRaw: 0n,
+        bnbForSwapQuotedRaw: 0n,
+        bnbForSwapMaxRaw: 0n,
+        bnbForGasRaw: 0n,
+        totalBnbNeededRaw: 0n,
+        bnbShortfallRaw: 0n,
+        gasPriceWei: 0n,
+        hasEligibleNft: false,
+        nftApprovalRequired: false,
+        vaultApprovalRequired: false,
+        billingPeriodSeconds: 2_592_000,
+      };
+    }
+
+    const billingWallet = buildBillingWallet();
+    await ensureBillingWalletRegistered({
+      npub: input.npub,
+      publicKey: input.publicKey,
+      privateKey: input.privateKey,
+      wallet: billingWallet,
+    });
+    const provider = billingWallet.provider as JsonRpcProvider;
+    const tokenRead = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, provider) as any;
+    const nftRead = new Contract(billingEvmConfig.eligibleNftAddress, NFT_ABI, provider) as any;
+    const routerRead = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, provider) as any;
+    const tokenWrite = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, billingWallet) as any;
+    const nftWrite = new Contract(billingEvmConfig.eligibleNftAddress, NFT_ABI, billingWallet) as any;
+    const vaultWrite = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, billingWallet) as any;
+    const routerWrite = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, billingWallet) as any;
+    const [feeQuote, billingBalance, rawOswapBalance, rawBnbBalance, rawNftBalance, rawNftAllowance, rawVaultAllowance, feeData] = await Promise.all([
+      fetchBillingFeeQuote(),
+      fetchBillingBalanceSnapshot(billingWallet),
+      tokenRead.balanceOf(billingWallet.address),
+      provider.getBalance(billingWallet.address),
+      nftRead.balanceOf(billingWallet.address),
+      tokenRead.allowance(billingWallet.address, billingEvmConfig.eligibleNftAddress),
+      tokenRead.allowance(billingWallet.address, billingEvmConfig.vaultAddress),
+      provider.getFeeData(),
+    ]);
+
+    const operatingFeeRaw = feeQuote.operatingFeeRaw;
+    const protocolFeeRaw = feeQuote.protocolFeeRaw;
+    const strategyFeeRaw = feeQuote.strategyFeeRaw;
+    const firstBillingAmountRaw = operatingFeeRaw + protocolFeeRaw + strategyFeeRaw;
+    if (firstBillingAmountRaw > targetVaultCreditRaw) {
+      throw new Error(
+        `Configured initial vault credit (${formatAmount(targetVaultCreditRaw, billingEvmConfig.tokenDecimals)} ${billingEvmConfig.tokenSymbol}) is below the first billing amount (${formatAmount(firstBillingAmountRaw, billingEvmConfig.tokenDecimals)} ${billingEvmConfig.tokenSymbol})`,
+      );
+    }
+
+    const walletOswapBalanceRaw = BigInt(rawOswapBalance.toString());
+    const walletBnbBalanceRaw = BigInt(rawBnbBalance.toString());
+    const hasEligibleNft = BigInt(rawNftBalance.toString()) > 0n;
+    const existingVaultCreditRaw = billingBalance.availableBalanceRaw;
+    const oswapForNftRaw = hasEligibleNft
+      ? 0n
+      : parseTokenAmount(billingEvmConfig.eligibleNftTotalMintingFee, billingEvmConfig.tokenDecimals);
+    const oswapForInitialVaultCreditRaw = maxBigInt(0n, targetVaultCreditRaw - existingVaultCreditRaw);
+    const requiredOswapRaw = oswapForNftRaw + oswapForInitialVaultCreditRaw;
+    const oswapShortfallRaw = maxBigInt(0n, requiredOswapRaw - walletOswapBalanceRaw);
+    const nftApprovalRequired = oswapForNftRaw > 0n && BigInt(rawNftAllowance.toString()) < oswapForNftRaw;
+    const vaultApprovalRequired = oswapForInitialVaultCreditRaw > 0n && BigInt(rawVaultAllowance.toString()) < oswapForInitialVaultCreditRaw;
+
+    let bnbForSwapQuotedRaw = 0n;
+    let bnbForSwapMaxRaw = 0n;
+    const swapPath = [billingEvmConfig.wethAddress, billingEvmConfig.tokenAddress];
+    if (oswapShortfallRaw > 0n) {
+      const amountsIn = await routerRead.getAmountsIn(oswapShortfallRaw, swapPath);
+      bnbForSwapQuotedRaw = BigInt(amountsIn[0].toString());
+      bnbForSwapMaxRaw = computeAmountInMax(bnbForSwapQuotedRaw, billingEvmConfig.swapSlippageBps);
+    }
+
+    const gasPriceWei = feeData.gasPrice ?? feeData.maxFeePerGas ?? 5_000_000_000n;
+    const swapDeadline = Math.floor(Date.now() / 1000) + 1_200;
+    const gas = {
+      swap: await estimateStepCost(
+        () => routerWrite.swapETHForExactTokens.estimateGas(
+          oswapShortfallRaw,
+          swapPath,
+          billingWallet.address,
+          swapDeadline,
+          { value: bnbForSwapMaxRaw },
+        ),
+        gasPriceWei,
+        DEFAULT_FALLBACK_SWAP_GAS,
+        oswapShortfallRaw > 0n,
+      ),
+      nftApproval: await estimateStepCost(
+        () => tokenWrite.approve.estimateGas(billingEvmConfig.eligibleNftAddress, oswapForNftRaw),
+        gasPriceWei,
+        DEFAULT_FALLBACK_APPROVE_GAS,
+        nftApprovalRequired,
+      ),
+      nftMint: await estimateStepCost(
+        () => nftWrite.stake.estimateGas(oswapForNftRaw),
+        gasPriceWei,
+        DEFAULT_FALLBACK_NFT_STAKE_GAS,
+        oswapForNftRaw > 0n,
+      ),
+      vaultApproval: await estimateStepCost(
+        () => tokenWrite.approve.estimateGas(billingEvmConfig.vaultAddress, oswapForInitialVaultCreditRaw),
+        gasPriceWei,
+        DEFAULT_FALLBACK_APPROVE_GAS,
+        vaultApprovalRequired,
+      ),
+      vaultDeposit: await estimateStepCost(
+        () => vaultWrite.deposit.estimateGas(billingWallet.address, oswapForInitialVaultCreditRaw),
+        gasPriceWei,
+        DEFAULT_FALLBACK_VAULT_DEPOSIT_GAS,
+        oswapForInitialVaultCreditRaw > 0n,
+      ),
+    };
+
+    const bnbForGasRaw =
+      (BigInt(gas.swap.gasUnits) +
+        BigInt(gas.nftApproval.gasUnits) +
+        BigInt(gas.nftMint.gasUnits) +
+        BigInt(gas.vaultApproval.gasUnits) +
+        BigInt(gas.vaultDeposit.gasUnits)) * gasPriceWei;
+    const totalBnbNeededRaw = bnbForSwapMaxRaw + bnbForGasRaw;
+    const bnbShortfallRaw = maxBigInt(0n, totalBnbNeededRaw - walletBnbBalanceRaw);
+
+    const actions: string[] = [];
+    if (hasEligibleNft) {
+      actions.push(`Use existing eligible ${billingEvmConfig.eligibleNftName}.`);
+    } else {
+      actions.push(`Mint ${billingEvmConfig.eligibleNftName} by staking ${formatAmount(oswapForNftRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol}.`);
+    }
+    if (oswapShortfallRaw > 0n) {
+      actions.unshift(
+        `Swap up to ${formatAmount(bnbForSwapMaxRaw, 18, 8)} BNB for ${formatAmount(oswapShortfallRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol}.`,
+      );
+    }
+    if (oswapForInitialVaultCreditRaw > 0n) {
+      actions.push(
+        `Deposit ${formatAmount(oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} into the billing vault.`,
+      );
+    } else {
+      actions.push(`Use existing vault credit of ${formatAmount(existingVaultCreditRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol}.`);
+    }
+    actions.push(
+      `Create ${mode} ${marketType} agent "${input.name}"${input.symbol ? ` for ${input.symbol}` : ""}.`,
+    );
+
+    const approvals: string[] = [];
+    if (nftApprovalRequired) {
+      approvals.push(
+        `Approve ${formatAmount(oswapForNftRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} for NFT contract ${billingEvmConfig.eligibleNftAddress}.`,
+      );
+    }
+    if (vaultApprovalRequired) {
+      approvals.push(
+        `Approve ${formatAmount(oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} for vault ${billingEvmConfig.vaultAddress}.`,
+      );
+    }
+
+    const prepared: PreparedAgentCreationResult = {
+      access: {
+        npub: input.npub,
+        publicKey: input.publicKey,
+        isWhitelisted: false,
+        canSkipNftPurchase: hasEligibleNft,
+      },
+      wallet: {
+        address: billingWallet.address,
+        oswapBalance: formatAmount(walletOswapBalanceRaw, billingEvmConfig.tokenDecimals),
+        bnbBalance: formatAmount(walletBnbBalanceRaw, 18, 8),
+        usesNostrPrivateKey: true,
+      },
+      nft: {
+        required: !hasEligibleNft,
+        hasEligibleNft,
+        eligibleOptions,
+      },
+      fees: {
+        operatingFee: formatAmount(operatingFeeRaw, billingEvmConfig.tokenDecimals),
+        protocolFee: formatAmount(protocolFeeRaw, billingEvmConfig.tokenDecimals),
+        strategyFee: formatAmount(strategyFeeRaw, billingEvmConfig.tokenDecimals),
+        firstBillingAmount: formatAmount(firstBillingAmountRaw, billingEvmConfig.tokenDecimals),
+        existingVaultCredit: formatAmount(existingVaultCreditRaw, billingEvmConfig.tokenDecimals),
+        targetVaultCredit: formatAmount(targetVaultCreditRaw, billingEvmConfig.tokenDecimals),
+        oswapForNft: formatAmount(oswapForNftRaw, billingEvmConfig.tokenDecimals),
+        oswapForInitialVaultCredit: formatAmount(oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+        requiredOswap: formatAmount(requiredOswapRaw, billingEvmConfig.tokenDecimals),
+        oswapShortfall: formatAmount(oswapShortfallRaw, billingEvmConfig.tokenDecimals),
+        note: `Vault deposits become billable ${feeQuote.tokenSymbol} credit. The initial deposit target is ${formatAmount(targetVaultCreditRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol}, and the first billing amount is ${formatAmount(firstBillingAmountRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} every ${Math.round(feeQuote.periodSeconds / 86_400)} days.`,
+      },
+      funding: {
+        bnbForSwapQuoted: formatAmount(bnbForSwapQuotedRaw, 18, 8),
+        bnbForSwapMax: formatAmount(bnbForSwapMaxRaw, 18, 8),
+        bnbForGas: formatAmount(bnbForGasRaw, 18, 8),
+        totalBnbNeeded: formatAmount(totalBnbNeededRaw, 18, 8),
+        bnbShortfall: formatAmount(bnbShortfallRaw, 18, 8),
+      },
+      approvals: {
+        nftApprovalRequired,
+        vaultApprovalRequired,
+      },
+      gas: {
+        gasPriceWei: gasPriceWei.toString(),
+        gasPriceGwei: formatAmount(gasPriceWei, 9, 4),
+        steps: gas,
+      },
+      executionPlan: {
+        agentName: input.name,
+        mode,
+        marketType,
+        symbol: input.symbol ?? null,
+        actions,
+        approvals,
+        depositToVault: formatAmount(oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+      },
+    };
+
+    const context: PreparedAgentCreationContext = {
+      prepared,
+      billingWallet,
+      operatingFeeRaw,
+      protocolFeeRaw,
+      strategyFeeRaw,
+      firstBillingAmountRaw,
+      existingVaultCreditRaw,
+      targetVaultCreditRaw,
+      oswapForNftRaw,
+      oswapForInitialVaultCreditRaw,
+      requiredOswapRaw,
+      oswapShortfallRaw,
+      walletOswapBalanceRaw,
+      walletBnbBalanceRaw,
+      bnbForSwapQuotedRaw,
+      bnbForSwapMaxRaw,
+      bnbForGasRaw,
+      totalBnbNeededRaw,
+      bnbShortfallRaw,
+      gasPriceWei,
+      hasEligibleNft,
+      nftApprovalRequired,
+      vaultApprovalRequired,
+      billingPeriodSeconds: feeQuote.periodSeconds,
+    };
+    debugLog("prepare_agent_creation", "result", context.prepared);
+    return context;
+  }
+
+  async function waitForVaultCredit(wallet: Wallet, minimumAvailableBalanceRaw: bigint): Promise<{
+    availableBalanceRaw: bigint;
+    pendingWithdrawalBalanceRaw: bigint;
+    walletRegistered: boolean;
+  }> {
+    const deadline = Date.now() + billingEvmConfig.balancePollTimeoutMs;
+    let lastError: string | undefined;
+    while (Date.now() < deadline) {
+      try {
+        const snapshot = await fetchBillingBalanceSnapshot(wallet);
+        if (snapshot.availableBalanceRaw >= minimumAvailableBalanceRaw) {
+          return snapshot;
+        }
+      } catch (err: any) {
+        lastError = err?.message;
+      }
+      await sleep(billingEvmConfig.balancePollIntervalMs);
+    }
+    throw new Error(
+      lastError
+        ? `Vault deposit was not indexed before timeout: ${lastError}`
+        : `Vault deposit was not indexed within ${billingEvmConfig.balancePollTimeoutMs}ms`,
+    );
   }
 
   // ── Existing tools ──────────────────────────────────────────────
@@ -399,6 +1231,7 @@ export default function (api: any) {
       if (!pk) {
         pk = Keys.generatePrivateKey();
         persistKeyToConfig(pk);
+        pluginConfig.nostrPrivateKey = pk;
         generated = true;
       }
       const publicKey = Keys.getPublicKey(pk);
@@ -635,8 +1468,51 @@ export default function (api: any) {
   });
 
   api.registerTool({
+    name: "prepare_agent_creation",
+    description: "Preflight for direct agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, checks whitelist/NFT access, calculates OSWAP and vault credit requirements, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction.",
+    parameters: Type.Object({
+      name: Type.String({ description: "Agent name" }),
+      mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
+      marketType: Type.Optional(Type.String({ description: '"spot" or "perp"', default: "spot" })),
+      symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        name: string;
+        mode?: string;
+        marketType?: string;
+        symbol?: string;
+      },
+    ) {
+      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
+      debugLog("prepare_agent_creation", "entry", {
+        name: params.name,
+        mode: params.mode ?? "paper",
+        marketType: params.marketType ?? "spot",
+        symbol: params.symbol,
+        usesNostrPrivateKey: true,
+      });
+      try {
+        const prepared = await prepareAgentCreationContext({
+          name: params.name,
+          mode: params.mode,
+          marketType: params.marketType,
+          symbol: params.symbol,
+          npub,
+          publicKey,
+          privateKey,
+        });
+        return textResult(prepared.prepared);
+      } catch (e: any) {
+        return textResult({ error: e.message });
+      }
+    },
+  });
+
+  api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, notify bot, register trader (live), log action, and verify. Replaces sequential calls to create_agent + notify_trading_bot + register_trader + log_agent_action + get_agent.",
+    description: "Create a trading agent, performing the full billing preflight and on-chain NFT/vault setup for non-whitelisted users before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Replaces sequential calls to create_agent + notify_trading_bot + register_trader + log_agent_action + get_agent.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount (auto-fetched for live mode)" })),
@@ -675,9 +1551,14 @@ export default function (api: any) {
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
       const mode = params.mode ?? "paper";
+      const marketType = params.marketType ?? "spot";
       const isLive = mode === "live";
-      debugLog("deploy_agent", "entry", params);
+      debugLog("deploy_agent", "entry", { ...params, usesNostrPrivateKey: true });
       const result: Record<string, unknown> = {};
+      let preparedContext: PreparedAgentCreationContext;
+      let billingHeaders: EthHeaders | undefined;
+      let billingWallet: Wallet | undefined;
+      let billingTransactions: Record<string, any> | undefined;
 
       // Auto-fetch initial capital for live mode
       let initialCapital = params.initialCapital;
@@ -703,24 +1584,187 @@ export default function (api: any) {
       const leverage = isLive ? (params.leverage ?? 3) : params.leverage;
 
       // Auto-compute buyLimit and settlement_config for live
-      const buyLimit = isLive && leverage
-        ? initialCapital * leverage
-        : undefined;
+      const buyLimit = isLive && leverage ? initialCapital * leverage : undefined;
       const settlementConfig = isLive && params.masterWalletAddress && params.walletAddress
         ? { eth_address: params.masterWalletAddress, agent_address: params.walletAddress }
         : undefined;
       debugLog("deploy_agent", "computed", { buyLimit, settlementConfig });
 
+      try {
+        preparedContext = await prepareAgentCreationContext({
+          name: params.name,
+          mode,
+          marketType,
+          symbol: params.symbol,
+          npub,
+          publicKey,
+          privateKey,
+        });
+      } catch (e: any) {
+        return textResult({ error: e.message });
+      }
+
+      const isWhitelisted = preparedContext.prepared.access.isWhitelisted;
+      if (isWhitelisted) {
+        result.billing = {
+          required: false,
+          bypassed: true,
+          reason: "whitelisted_access",
+        };
+      } else {
+        const activeBillingWallet = preparedContext.billingWallet;
+        if (!activeBillingWallet) {
+          return textResult({ error: "Billing wallet could not be derived from nostrPrivateKey" });
+        }
+        billingWallet = activeBillingWallet;
+        billingTransactions = {
+          swap: { ok: preparedContext.oswapShortfallRaw === 0n, skipped: preparedContext.oswapShortfallRaw === 0n },
+          nftApproval: { ok: !preparedContext.nftApprovalRequired, skipped: !preparedContext.nftApprovalRequired },
+          nftMint: { ok: preparedContext.oswapForNftRaw === 0n, skipped: preparedContext.oswapForNftRaw === 0n },
+          vaultApproval: { ok: !preparedContext.vaultApprovalRequired, skipped: !preparedContext.vaultApprovalRequired },
+          vaultDeposit: { ok: preparedContext.oswapForInitialVaultCreditRaw === 0n, skipped: preparedContext.oswapForInitialVaultCreditRaw === 0n },
+        };
+        result.billing = {
+          required: true,
+          walletAddress: activeBillingWallet.address,
+          preflight: preparedContext.prepared,
+          transactions: billingTransactions,
+        };
+
+        if (preparedContext.bnbShortfallRaw > 0n) {
+          return textResult({
+            error: `Insufficient BNB. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB`,
+            ...result,
+          });
+        }
+
+        const swapPath = [billingEvmConfig.wethAddress, billingEvmConfig.tokenAddress];
+        const routerContract = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, activeBillingWallet) as any;
+        const tokenContract = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, activeBillingWallet) as any;
+        const nftContract = new Contract(billingEvmConfig.eligibleNftAddress, NFT_ABI, activeBillingWallet) as any;
+        const vaultContract = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, activeBillingWallet) as any;
+
+        const failBilling = (step: string, error: string) => {
+          if (billingTransactions) {
+            billingTransactions[step] = { ok: false, skipped: false, error };
+          }
+          return textResult({
+            error,
+            ...result,
+          });
+        };
+
+        if (preparedContext.oswapShortfallRaw > 0n) {
+          try {
+            const deadline = Math.floor(Date.now() / 1000) + 1_200;
+            const swapTx = await routerContract.swapETHForExactTokens(
+              preparedContext.oswapShortfallRaw,
+              swapPath,
+              activeBillingWallet.address,
+              deadline,
+              { value: preparedContext.bnbForSwapMaxRaw },
+            );
+            const receipt = await swapTx.wait();
+            billingTransactions!.swap = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              oswapAmount: formatAmount(preparedContext.oswapShortfallRaw, billingEvmConfig.tokenDecimals),
+              maxBnbAmount: formatAmount(preparedContext.bnbForSwapMaxRaw, 18, 8),
+            };
+          } catch (e: any) {
+            return failBilling("swap", `BNB to ${billingEvmConfig.tokenSymbol} swap failed: ${e.message}`);
+          }
+        }
+
+        if (preparedContext.nftApprovalRequired) {
+          try {
+            const approveTx = await tokenContract.approve(
+              billingEvmConfig.eligibleNftAddress,
+              preparedContext.oswapForNftRaw,
+            );
+            const receipt = await approveTx.wait();
+            billingTransactions!.nftApproval = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
+            };
+          } catch (e: any) {
+            return failBilling("nftApproval", `NFT approval failed: ${e.message}`);
+          }
+        }
+
+        if (preparedContext.oswapForNftRaw > 0n) {
+          try {
+            const mintTx = await nftContract.stake(preparedContext.oswapForNftRaw);
+            const receipt = await mintTx.wait();
+            billingTransactions!.nftMint = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
+            };
+          } catch (e: any) {
+            return failBilling("nftMint", `NFT mint failed: ${e.message}`);
+          }
+        }
+
+        if (preparedContext.vaultApprovalRequired) {
+          try {
+            const approveTx = await tokenContract.approve(
+              billingEvmConfig.vaultAddress,
+              preparedContext.oswapForInitialVaultCreditRaw,
+            );
+            const receipt = await approveTx.wait();
+            billingTransactions!.vaultApproval = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+            };
+          } catch (e: any) {
+            return failBilling("vaultApproval", `Vault approval failed: ${e.message}`);
+          }
+        }
+
+        if (preparedContext.oswapForInitialVaultCreditRaw > 0n) {
+          try {
+            const depositTx = await vaultContract.deposit(
+              activeBillingWallet.address,
+              preparedContext.oswapForInitialVaultCreditRaw,
+            );
+            const receipt = await depositTx.wait();
+            const indexedBalance = await waitForVaultCredit(
+              activeBillingWallet,
+              preparedContext.existingVaultCreditRaw + preparedContext.oswapForInitialVaultCreditRaw,
+            );
+            billingTransactions!.vaultDeposit = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+              indexedAvailableBalance: formatAmount(indexedBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
+            };
+          } catch (e: any) {
+            return failBilling("vaultDeposit", `Vault deposit failed: ${e.message}`);
+          }
+        }
+
+        billingHeaders = await buildBillingHeaders(activeBillingWallet);
+      }
+
       // Step 1: Create agent (fatal if fails)
       let agentId: number;
       let agentUrl: string;
+      const creationTimestamp = new Date().toISOString();
       try {
         const payload: Record<string, unknown> = {
           name: params.name,
           avatarUrl: "",
           initialCapital,
           mode,
-          marketType: params.marketType ?? "spot",
+          marketType,
           owner: npub,
           pubkey: Nip19.npubEncode(publicKey),
           isActive: true,
@@ -740,21 +1784,27 @@ export default function (api: any) {
         debugLog("deploy_agent", "create.api.req POST /api/agent", payload);
         const res = await fetch(`${baseUrl}/api/agent`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: auth },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: auth,
+            ...(billingHeaders ?? {}),
+          },
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
           const errText = await res.text();
           debugLog("deploy_agent", "create.api.res", { status: res.status, error: errText });
-          return textResult({ create: { ok: false, error: `create_agent failed: ${res.status} ${errText}` } });
+          result.create = { ok: false, error: `create_agent failed: ${res.status} ${errText}` };
+          return textResult(result);
         }
         const data = await res.json();
         agentId = data.agentId;
         agentUrl = `https://agent.openswap.xyz/trading-agents/${publicKey}/${agentId}`;
         debugLog("deploy_agent", "create.api.res", { status: res.status, body: data });
-        result.create = { ok: true, agentId, agentUrl };
+        result.create = { ok: true, agentId, agentUrl, createdAt: creationTimestamp };
       } catch (e: any) {
-        return textResult({ create: { ok: false, error: e.message } });
+        result.create = { ok: false, error: e.message };
+        return textResult(result);
       }
 
       // Step 2: Notify trading bot
@@ -770,9 +1820,9 @@ export default function (api: any) {
           description: params.strategyDescription ?? null,
           mode,
           signed_at: signedAt,
-          market_type: params.marketType ?? "spot",
+          market_type: marketType,
         };
-        if (params.leverage != null) body.leverage = params.leverage;
+        if (leverage != null) body.leverage = leverage;
         if (isLive && settlementConfig) {
           body.settlement_config = JSON.stringify({
             ...settlementConfig,
@@ -813,7 +1863,7 @@ export default function (api: any) {
       if (isLive && params.masterWalletAddress && params.walletAddress) {
         try {
           const signedAt = Math.floor(Date.now() / 1000);
-          const marketType = params.marketType ?? "perp";
+          const settlementMarketType = params.marketType ?? "perp";
           const traderBody: Record<string, unknown> = {
             trader_id: agentId,
             owner: npub,
@@ -821,8 +1871,8 @@ export default function (api: any) {
             agent_address: params.walletAddress,
             symbol: params.symbol!,
             chain_id: params.chainId!,
-            market_type: marketType,
-            venue_type: marketType === "perp" ? "dex_orderbook" : "dex_amm",
+            market_type: settlementMarketType,
+            venue_type: settlementMarketType === "perp" ? "dex_orderbook" : "dex_amm",
             buy_limit_usd: buyLimit!,
             signed_at: signedAt,
           };
@@ -899,6 +1949,39 @@ export default function (api: any) {
         }
       } catch {
         result.verify = { ok: false };
+      }
+
+      if (!isWhitelisted && billingWallet) {
+        try {
+          const [postBalance, subscriptions] = await Promise.all([
+            fetchBillingBalanceSnapshot(billingWallet),
+            fetchBillingSubscriptions(billingWallet),
+          ]);
+          const matchedSubscription = subscriptions.find((subscription: any) => Number(subscription.agent_id) === agentId);
+          (result.billing as any).result = {
+            nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
+            vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+            updatedVaultCredit: formatAmount(postBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
+            pendingWithdrawalCredit: formatAmount(postBalance.pendingWithdrawalBalanceRaw, billingEvmConfig.tokenDecimals),
+            feeBreakdown: preparedContext.prepared.fees,
+            agentId,
+            agentName: params.name,
+            creationTimestamp,
+            nextBillingDateEstimate: matchedSubscription?.next_renewal_at
+              ?? new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
+          };
+        } catch (e: any) {
+          (result.billing as any).result = {
+            nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
+            vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+            feeBreakdown: preparedContext.prepared.fees,
+            agentId,
+            agentName: params.name,
+            creationTimestamp,
+            nextBillingDateEstimate: new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
+            warning: e.message,
+          };
+        }
       }
 
       debugLog("deploy_agent", "result", result);
