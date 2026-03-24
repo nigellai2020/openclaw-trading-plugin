@@ -114,9 +114,9 @@ const DEFAULT_BSC_VAULT_ADDRESS = "0x15780a63c8a47dd27c4c7f7d17673929e0cb4d05";
 const DEFAULT_ELIGIBLE_NFT_ADDRESS = "0xc32c70c6cc2338daa3fdfbb25c98f1227c673175";
 const DEFAULT_ELIGIBLE_NFT_EXPLORER_URL = "https://testnet.bscscan.com/address/0xc32c70c6cc2338daa3fdfbb25c98f1227c673175";
 const DEFAULT_ELIGIBLE_NFT_NAME = "Troll NFT";
-const DEFAULT_ELIGIBLE_NFT_MINIMUM_STAKE = 100;
+const DEFAULT_ELIGIBLE_NFT_MINIMUM_STAKE = 20;
 const DEFAULT_ELIGIBLE_NFT_PROTOCOL_FEE = 10;
-const DEFAULT_ELIGIBLE_NFT_TOTAL_MINTING_FEE = 110;
+const DEFAULT_ELIGIBLE_NFT_TOTAL_MINTING_FEE = 30;
 const DEFAULT_BILLING_SWAP_SLIPPAGE_BPS = 50;
 const DEFAULT_BILLING_POLL_INTERVAL_MS = 5_000;
 const DEFAULT_BILLING_POLL_TIMEOUT_MS = 90_000;
@@ -272,6 +272,22 @@ type PreparedAgentCreationContext = {
   nftApprovalRequired: boolean;
   vaultApprovalRequired: boolean;
   billingPeriodSeconds: number;
+  selectedEligibleNft?: EligibleNftConfig;
+  ownedEligibleNft?: EligibleNftConfig;
+};
+
+type EligibleNftConfig = {
+  id: string;
+  name: string;
+  contractAddress: string;
+  explorerUrl: string;
+  minimumStakeRaw: bigint;
+  protocolFeeRaw: bigint;
+  totalMintingFeeRaw: bigint;
+  minimumStake: string;
+  protocolFee: string;
+  totalMintingFee: string;
+  sortIndex: number;
 };
 
 function normalizeHexPrivateKey(privateKey: string): string {
@@ -347,6 +363,35 @@ function buildBillingEvmConfig(pluginConfig: any): BillingEvmConfig {
     balancePollIntervalMs: pluginConfig.billingPollIntervalMs ?? DEFAULT_BILLING_POLL_INTERVAL_MS,
     balancePollTimeoutMs: pluginConfig.billingPollTimeoutMs ?? DEFAULT_BILLING_POLL_TIMEOUT_MS,
   };
+}
+
+function buildExplorerUrl(templateUrl: string, configuredAddress: string, contractAddress: string): string {
+  const normalizedConfiguredAddress = configuredAddress.toLowerCase();
+  if (templateUrl.toLowerCase().includes(normalizedConfiguredAddress)) {
+    return templateUrl.replace(new RegExp(configuredAddress, "ig"), contractAddress);
+  }
+
+  try {
+    const url = new URL(templateUrl);
+    if (url.pathname.startsWith("/address/")) {
+      url.pathname = `/address/${contractAddress}`;
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    }
+  } catch {}
+
+  return `https://testnet.bscscan.com/address/${contractAddress}`;
+}
+
+function isActiveNftConfig(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "1" || normalized === "true";
+  }
+  return false;
 }
 
 async function estimateStepCost(
@@ -634,6 +679,96 @@ export default function (api: any) {
     return Boolean(extractApiData(body)?.isWhitelisted);
   }
 
+  async function fetchEligibleNftConfigs(): Promise<EligibleNftConfig[]> {
+    const url = `${baseUrl}/api/nft-config`;
+    debugLog("billing", "api.req /api/nft-config", { url });
+    const res = await fetch(url);
+    const body = await res.json().catch(async () => await res.text().catch(() => null));
+    debugLog("billing", "api.res /api/nft-config", { status: res.status, body });
+    if (!res.ok) {
+      throw new Error(`nft-config failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+
+    const data = extractApiData<any>(body);
+    if (!Array.isArray(data)) {
+      throw new Error("nft-config returned invalid payload");
+    }
+
+    const activeConfigs = data.filter((item) => isActiveNftConfig(item?.is_active));
+    if (activeConfigs.length === 0) {
+      throw new Error("nft-config returned no usable active NFT configs");
+    }
+
+    const parsed = activeConfigs.map((item, index) => {
+      const entryId = item?.id == null ? String(index + 1) : String(item.id);
+      const rawAddress = typeof item?.address === "string" ? item.address : "";
+      const rawName = typeof item?.nft_name === "string" ? item.nft_name.trim() : "";
+      const rawMinimumStake = item?.minimum_stake;
+      const rawProtocolFee = item?.protocol_fee;
+
+      if (!rawAddress) {
+        throw new Error(`nft-config active entry ${entryId} is missing address`);
+      }
+      if (rawMinimumStake == null) {
+        throw new Error(`nft-config active entry ${entryId} is missing minimum_stake`);
+      }
+      if (rawProtocolFee == null) {
+        throw new Error(`nft-config active entry ${entryId} is missing protocol_fee`);
+      }
+
+      let contractAddress: string;
+      let minimumStakeRaw: bigint;
+      let protocolFeeRaw: bigint;
+      try {
+        contractAddress = getAddress(rawAddress);
+      } catch {
+        throw new Error(`nft-config active entry ${entryId} has invalid address: ${rawAddress}`);
+      }
+      try {
+        minimumStakeRaw = parseTokenAmount(rawMinimumStake, billingEvmConfig.tokenDecimals);
+      } catch {
+        throw new Error(`nft-config active entry ${entryId} has invalid minimum_stake: ${rawMinimumStake}`);
+      }
+      try {
+        protocolFeeRaw = parseTokenAmount(rawProtocolFee, billingEvmConfig.tokenDecimals);
+      } catch {
+        throw new Error(`nft-config active entry ${entryId} has invalid protocol_fee: ${rawProtocolFee}`);
+      }
+
+      const totalMintingFeeRaw = minimumStakeRaw + protocolFeeRaw;
+      const name = rawName || `${DEFAULT_ELIGIBLE_NFT_NAME} ${entryId}`;
+      return {
+        id: entryId,
+        name,
+        contractAddress,
+        explorerUrl: buildExplorerUrl(
+          billingEvmConfig.eligibleNftExplorerUrl,
+          billingEvmConfig.eligibleNftAddress,
+          contractAddress,
+        ),
+        minimumStakeRaw,
+        protocolFeeRaw,
+        totalMintingFeeRaw,
+        minimumStake: formatAmount(minimumStakeRaw, billingEvmConfig.tokenDecimals),
+        protocolFee: formatAmount(protocolFeeRaw, billingEvmConfig.tokenDecimals),
+        totalMintingFee: formatAmount(totalMintingFeeRaw, billingEvmConfig.tokenDecimals),
+        sortIndex: index,
+      };
+    });
+
+    parsed.sort((a, b) => {
+      if (a.totalMintingFeeRaw !== b.totalMintingFeeRaw) {
+        return a.totalMintingFeeRaw < b.totalMintingFeeRaw ? -1 : 1;
+      }
+      if (a.minimumStakeRaw !== b.minimumStakeRaw) {
+        return a.minimumStakeRaw < b.minimumStakeRaw ? -1 : 1;
+      }
+      return a.sortIndex - b.sortIndex;
+    });
+
+    return parsed;
+  }
+
   async function fetchBillingFeeQuote(): Promise<{
     periodSeconds: number;
     operatingFeeRaw: bigint;
@@ -726,14 +861,6 @@ export default function (api: any) {
   }): Promise<PreparedAgentCreationContext> {
     const mode = input.mode ?? "paper";
     const marketType = resolveMarketType(mode, input.marketType);
-    const eligibleOptions = [{
-      name: billingEvmConfig.eligibleNftName,
-      contractAddress: billingEvmConfig.eligibleNftAddress,
-      explorerUrl: billingEvmConfig.eligibleNftExplorerUrl,
-      minimumStake: String(billingEvmConfig.eligibleNftMinimumStake),
-      protocolFee: String(billingEvmConfig.eligibleNftProtocolFee),
-      totalMintingFee: String(billingEvmConfig.eligibleNftTotalMintingFee),
-    }];
 
     const isWhitelisted = await fetchWhitelistStatus(input.npub);
     if (isWhitelisted) {
@@ -753,7 +880,7 @@ export default function (api: any) {
           nft: {
             required: false,
             hasEligibleNft: false,
-            eligibleOptions,
+            eligibleOptions: [],
           },
           fees: {
             operatingFee: "0",
@@ -801,9 +928,13 @@ export default function (api: any) {
         nftApprovalRequired: false,
         vaultApprovalRequired: false,
         billingPeriodSeconds: 2_592_000,
+        selectedEligibleNft: undefined,
+        ownedEligibleNft: undefined,
       };
     }
 
+    const eligibleNftConfigs = await fetchEligibleNftConfigs();
+    const selectedEligibleNft = eligibleNftConfigs[0];
     const billingWallet = buildBillingWallet();
     await ensureBillingWalletRegistered({
       npub: input.npub,
@@ -813,19 +944,19 @@ export default function (api: any) {
     });
     const provider = billingWallet.provider as JsonRpcProvider;
     const tokenRead = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, provider) as any;
-    const nftRead = new Contract(billingEvmConfig.eligibleNftAddress, NFT_ABI, provider) as any;
+    const nftReads = eligibleNftConfigs.map((config) => new Contract(config.contractAddress, NFT_ABI, provider) as any);
     const routerRead = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, provider) as any;
     const tokenWrite = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, billingWallet) as any;
-    const nftWrite = new Contract(billingEvmConfig.eligibleNftAddress, NFT_ABI, billingWallet) as any;
+    const nftWrite = new Contract(selectedEligibleNft.contractAddress, NFT_ABI, billingWallet) as any;
     const vaultWrite = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, billingWallet) as any;
     const routerWrite = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, billingWallet) as any;
-    const [feeQuote, billingBalance, rawOswapBalance, rawBnbBalance, rawNftBalance, rawNftAllowance, rawVaultAllowance, feeData] = await Promise.all([
+    const [feeQuote, billingBalance, rawOswapBalance, rawBnbBalance, rawNftBalances, rawNftAllowance, rawVaultAllowance, feeData] = await Promise.all([
       fetchBillingFeeQuote(),
       fetchBillingBalanceSnapshot(billingWallet),
       tokenRead.balanceOf(billingWallet.address),
       provider.getBalance(billingWallet.address),
-      nftRead.balanceOf(billingWallet.address),
-      tokenRead.allowance(billingWallet.address, billingEvmConfig.eligibleNftAddress),
+      Promise.all(nftReads.map((contract) => contract.balanceOf(billingWallet.address))),
+      tokenRead.allowance(billingWallet.address, selectedEligibleNft.contractAddress),
       tokenRead.allowance(billingWallet.address, billingEvmConfig.vaultAddress),
       provider.getFeeData(),
     ]);
@@ -838,11 +969,12 @@ export default function (api: any) {
 
     const walletOswapBalanceRaw = BigInt(rawOswapBalance.toString());
     const walletBnbBalanceRaw = BigInt(rawBnbBalance.toString());
-    const hasEligibleNft = BigInt(rawNftBalance.toString()) > 0n;
+    const ownedEligibleNft = eligibleNftConfigs.find((_, index) => BigInt(rawNftBalances[index].toString()) > 0n);
+    const hasEligibleNft = ownedEligibleNft != null;
     const existingVaultCreditRaw: bigint = billingBalance.availableBalanceRaw;
     const oswapForNftRaw: bigint = hasEligibleNft
       ? 0n
-      : parseTokenAmount(billingEvmConfig.eligibleNftTotalMintingFee, billingEvmConfig.tokenDecimals);
+      : selectedEligibleNft.totalMintingFeeRaw;
     const oswapForInitialVaultCreditRaw: bigint = targetVaultCreditRaw > existingVaultCreditRaw
       ? targetVaultCreditRaw - existingVaultCreditRaw
       : 0n;
@@ -876,7 +1008,7 @@ export default function (api: any) {
         oswapShortfallRaw > 0n,
       ),
       nftApproval: await estimateStepCost(
-        () => tokenWrite.approve.estimateGas(billingEvmConfig.eligibleNftAddress, oswapForNftRaw),
+        () => tokenWrite.approve.estimateGas(selectedEligibleNft.contractAddress, oswapForNftRaw),
         gasPriceWei,
         DEFAULT_FALLBACK_APPROVE_GAS,
         nftApprovalRequired,
@@ -912,9 +1044,9 @@ export default function (api: any) {
 
     const actions: string[] = [];
     if (hasEligibleNft) {
-      actions.push(`Use existing eligible ${billingEvmConfig.eligibleNftName}.`);
+      actions.push(`Use existing eligible ${ownedEligibleNft!.name}.`);
     } else {
-      actions.push(`Mint ${billingEvmConfig.eligibleNftName} by staking ${formatAmount(oswapForNftRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol}.`);
+      actions.push(`Mint cheapest eligible NFT ${selectedEligibleNft.name} by staking ${formatAmount(oswapForNftRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol}.`);
     }
     if (oswapShortfallRaw > 0n) {
       actions.unshift(
@@ -935,7 +1067,7 @@ export default function (api: any) {
     const approvals: string[] = [];
     if (nftApprovalRequired) {
       approvals.push(
-        `Approve ${formatAmount(oswapForNftRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} for NFT contract ${billingEvmConfig.eligibleNftAddress}.`,
+        `Approve ${formatAmount(oswapForNftRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} for NFT contract ${selectedEligibleNft.contractAddress}.`,
       );
     }
     if (vaultApprovalRequired) {
@@ -960,7 +1092,14 @@ export default function (api: any) {
       nft: {
         required: !hasEligibleNft,
         hasEligibleNft,
-        eligibleOptions,
+        eligibleOptions: eligibleNftConfigs.map((config) => ({
+          name: config.name,
+          contractAddress: config.contractAddress,
+          explorerUrl: config.explorerUrl,
+          minimumStake: config.minimumStake,
+          protocolFee: config.protocolFee,
+          totalMintingFee: config.totalMintingFee,
+        })),
       },
       fees: {
         operatingFee: formatAmount(operatingFeeRaw, billingEvmConfig.tokenDecimals),
@@ -1027,6 +1166,8 @@ export default function (api: any) {
       nftApprovalRequired,
       vaultApprovalRequired,
       billingPeriodSeconds: feeQuote.periodSeconds,
+      selectedEligibleNft,
+      ownedEligibleNft,
     };
     debugLog("prepare_agent_creation", "result", context.prepared);
     return context;
@@ -1528,7 +1669,7 @@ export default function (api: any) {
 
   api.registerTool({
     name: "prepare_agent_creation",
-    description: "Preflight for direct agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, checks whitelist/NFT access, calculates OSWAP and vault credit requirements, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction.",
+    description: "Preflight for direct agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, checks whitelist and active /api/nft-config eligibility, calculates OSWAP and vault credit requirements, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
@@ -1571,7 +1712,7 @@ export default function (api: any) {
 
   api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, performing the full billing preflight and on-chain NFT/vault setup for non-whitelisted users before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Replaces sequential calls to create_agent + notify_trading_bot + register_trader + log_agent_action + get_agent.",
+    description: "Create a trading agent, performing the full billing preflight and cheapest active NFT/vault setup for non-whitelisted users before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Replaces sequential calls to create_agent + notify_trading_bot + register_trader + log_agent_action + get_agent.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount (auto-fetched for live mode)" })),
@@ -1717,7 +1858,10 @@ export default function (api: any) {
         const swapPath = [billingEvmConfig.wethAddress, billingEvmConfig.tokenAddress];
         const routerContract = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, activeBillingWallet) as any;
         const tokenContract = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, activeBillingWallet) as any;
-        const nftContract = new Contract(billingEvmConfig.eligibleNftAddress, NFT_ABI, activeBillingWallet) as any;
+        if (!preparedContext.selectedEligibleNft) {
+          return textResult({ error: "No active eligible NFT config available", ...result });
+        }
+        const nftContract = new Contract(preparedContext.selectedEligibleNft.contractAddress, NFT_ABI, activeBillingWallet) as any;
         const vaultContract = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, activeBillingWallet) as any;
 
         const failBilling = (step: string, error: string) => {
@@ -1756,7 +1900,7 @@ export default function (api: any) {
         if (preparedContext.nftApprovalRequired) {
           try {
             const approveTx = await tokenContract.approve(
-              billingEvmConfig.eligibleNftAddress,
+              preparedContext.selectedEligibleNft.contractAddress,
               preparedContext.oswapForNftRaw,
             );
             const receipt = await approveTx.wait();

@@ -70,7 +70,7 @@
       },
       "bscEligibleNftMinimumStake": {
         "type": "number",
-        "default": 100
+        "default": 20
       },
       "bscEligibleNftProtocolFee": {
         "type": "number",
@@ -78,7 +78,7 @@
       },
       "bscEligibleNftTotalMintingFee": {
         "type": "number",
-        "default": 110
+        "default": 30
       },
       "billingSwapSlippageBps": {
         "type": "number",

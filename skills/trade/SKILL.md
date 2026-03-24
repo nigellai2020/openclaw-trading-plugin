@@ -91,6 +91,7 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 If `access.hasAccess = false`:
 - Explain that OpenClaw uses the configured `nostrPrivateKey` as the BSC/Ethereum signing key for NFT checks, OSWAP funding, vault credit deposit, and billing auth.
 - Explain that `prepare_agent_creation` automatically registers the derived billing wallet through `POST /api/auth/login` before billing checks.
+- Explain that the plugin loads all active NFT configs from `/api/nft-config` and only uses the cheapest eligible NFT when a new mint is required.
 - Call `prepare_agent_creation` with:
   - Paper: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
   - Live: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
