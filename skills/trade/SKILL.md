@@ -25,13 +25,9 @@ Call `init_trading_session` with the chosen `mode`.
 
 Handle the response:
 - **keys.generated = true**: Inform the user a new Nostr identity was created. Do not display the private key or nsec unless asked.
-- **access.hasAccess = false**: Do not stop. Tell the user they are not whitelisted, so agent creation will need the BSC billing flow: eligible NFT check, OSWAP funding, vault credit deposit, then agent creation.
 - **If live + wallets.wallets has entries**: Filter to the chosen network first, then present the active wallets (name, walletAddress, masterWalletAddress, network). Ask which to reuse. Save the chosen `walletId`, `walletAddress`, and `masterWalletAddress`, then continue to Step 5.
 - **If live + no wallets on the chosen network**: Continue to Step 3.
 - **If paper**: Skip to Step 5.
-
-Important:
-- `init_trading_session` may return early when `access.hasAccess = false`, so for live mode you may need to call `list_wallets` separately before deciding whether to reuse an existing wallet.
 
 ## Step 3 (live only) — Create API wallet on Hyperliquid
 Ask the user if they already have a Hyperliquid API wallet private key.
@@ -87,24 +83,23 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 - **Live**: `deploy_agent` auto-fetches the wallet balance as initial capital. **Do NOT ask the user for initial capital in live mode.** Do NOT call `get_hyperliquid_balance` separately — the deploy step handles it.
 - **Paper**: Ask the user for their desired initial capital.
 
-## Step 7 — Run billing preflight for non-whitelisted users
-If `access.hasAccess = false`:
-- Explain that OpenClaw uses the configured `nostrPrivateKey` as the BSC/Ethereum signing key for NFT checks, OSWAP funding, vault credit deposit, and billing auth.
+## Step 7 — Run billing preflight
+- Explain that OpenClaw uses the configured `nostrPrivateKey` as the BSC/Ethereum signing key for any required NFT checks, OSWAP funding, vault credit deposit, and billing auth.
 - Explain that `prepare_agent_creation` automatically registers the derived billing wallet through `POST /api/auth/login` before billing checks.
 - Explain that the plugin loads all active NFT configs from `/api/nft-config` and only uses the cheapest eligible NFT when a new mint is required.
 - Call `prepare_agent_creation` with:
   - Paper: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
   - Live: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
 - Present the returned plan clearly:
-  - whether an NFT mint is needed
+  - whether upfront billing setup is required
+  - if billing is required, whether an NFT mint is needed
   - how much OSWAP is required
   - how much BNB is required for swap + gas
   - what approvals will happen
   - how much goes into the vault
   - that the vault deposit becomes billable credit, not a one-time burn
+  - if billing is not required, say no upfront NFT purchase or vault funding is needed for this account
 - If `prepare_agent_creation` reports an `error`, STOP and explain it.
-
-If `access.hasAccess = true`, skip this step.
 
 ## Step 8 — Confirm before creating
 Present a summary:
@@ -113,7 +108,8 @@ Present a summary:
 - Initial capital
 - If paper: market type
 - If live: network, `chainId`, master wallet, agent wallet, leverage
-- If not whitelisted: include the `prepare_agent_creation` billing summary
+- If `prepare_agent_creation.billing.required = true`: include the billing summary
+- If `prepare_agent_creation.billing.required = false`: say no upfront billing setup is required
 
 Ask the user to confirm. Do NOT proceed until they explicitly confirm.
 

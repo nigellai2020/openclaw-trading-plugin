@@ -10,7 +10,6 @@ Follow these steps to run a backtest.
 ## Step 1 — Initialize session
 Call `init_trading_session` with mode `"paper"`. Handle the response:
 - **keys.generated = true**: Inform the user a new Nostr identity was created.
-- **access.hasAccess = false**: Inform the user they are not whitelisted for backtest submission and STOP. The backend rejects backtests for non-whitelisted users.
 
 ## Step 2 — Identify the agent
 If the user specified an agent ID, use it. Otherwise ask the user for the agent ID. Call `get_agent` to fetch the agent details (name, strategy, capital).
@@ -47,6 +46,7 @@ Ask the user to confirm before proceeding. Do NOT call `create_backtest` until t
 Call `create_backtest` with agentId, initialCapital, startTime, endTime, optional `timeZone`, and optional protocolFee, gasFee, strategy.
 - If OpenClaw resolved a timezone phrase from the user, pass offset-bearing ISO strings plus the resolved `timeZone`.
 - If there was no timezone phrase, pass the user's naive value and let the tool apply runtime-timezone fallback.
+- If the backend rejects the submission, surface that backend error directly and STOP.
 - After submission, keep the response simple: report the `jobId` and status. Do not echo technical lines like `Timezone used` or `Normalized UTC range` unless the user explicitly asks for them.
 
 ## Step 7 — Poll progress and fetch results

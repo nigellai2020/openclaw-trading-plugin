@@ -41,22 +41,22 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | `get_token_prices` | Get live prices of all tokens     |
 | `get_ohlc`         | Get OHLC candle data for a symbol |
 
-### Identity & Access
+### Identity
 
 | Tool                     | Description                                      |
 | ------------------------ | ------------------------------------------------ |
 | `get_nostr_identity`     | Retrieve user's Nostr npub and public key        |
-| `request_trading_access` | Request trading access (requires admin approval) |
 
 ### Session & Agent Management
 
-| Tool                    | Description                                                                     |
-| ----------------------- | ------------------------------------------------------------------------------- |
-| `init_trading_session`  | Initialize session: check keys, verify access, optionally list wallets          |
-| `setup_live_wallet`     | Store agent wallet key in TEE and register in backend                           |
-| `deploy_agent`          | Create agent, notify bot, register trader (live), log action, verify            |
-| `get_agent`             | Get agent details by ID                                                         |
-| `get_hyperliquid_balance` | Get USDC balance of a Hyperliquid master wallet                               |
+| Tool                      | Description                                                                 |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `init_trading_session`    | Initialize session: check keys and optionally list wallets                 |
+| `prepare_agent_creation`  | Preflight agent creation and summarize any required billing, NFT, or vault setup |
+| `setup_live_wallet`       | Store agent wallet key in TEE and register in backend                       |
+| `deploy_agent`            | Create agent, run any required billing setup, notify bot, register trader (live), log action, verify |
+| `get_agent`               | Get agent details by ID                                                     |
+| `get_hyperliquid_balance` | Get USDC balance of a Hyperliquid master wallet                             |
 
 ### Backtesting
 

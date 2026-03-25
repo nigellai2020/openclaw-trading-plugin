@@ -177,10 +177,13 @@ type GasEstimateSummary = {
 };
 
 type PreparedAgentCreationResult = {
-  access: {
+  identity: {
     npub: string;
     publicKey: string;
-    isWhitelisted: boolean;
+  };
+  billing: {
+    required: boolean;
+    bypassed: boolean;
     canSkipNftPurchase: boolean;
   };
   wallet: {
@@ -994,14 +997,14 @@ export default function (api: any) {
     };
   }
 
-  async function fetchWhitelistStatus(npub: string): Promise<boolean> {
-    const whitelistUrl = `${baseUrl}/api/is-whitelisted/${npub}`;
-    debugLog("billing", "api.req /api/is-whitelisted", { url: whitelistUrl, npub });
-    const res = await fetch(whitelistUrl);
+  async function fetchBillingBypassStatus(npub: string): Promise<boolean> {
+    const url = `${baseUrl}/api/is-whitelisted/${npub}`;
+    debugLog("billing", "api.req billing-bypass-status", { url, npub });
+    const res = await fetch(url);
     const body = await res.json().catch(async () => await res.text().catch(() => null));
-    debugLog("billing", "api.res /api/is-whitelisted", { status: res.status, body });
+    debugLog("billing", "api.res billing-bypass-status", { status: res.status, body });
     if (!res.ok) {
-      throw new Error(`whitelist check failed: ${res.status} ${responseErrorMessage(body)}`);
+      throw new Error(`billing bypass check failed: ${res.status} ${responseErrorMessage(body)}`);
     }
     return Boolean(extractApiData(body)?.isWhitelisted);
   }
@@ -1189,15 +1192,18 @@ export default function (api: any) {
     const mode = input.mode ?? "paper";
     const marketType = resolveMarketType(mode, input.marketType);
 
-    const isWhitelisted = await fetchWhitelistStatus(input.npub);
-    if (isWhitelisted) {
+    const billingBypassed = await fetchBillingBypassStatus(input.npub);
+    if (billingBypassed) {
       const billingWallet = buildBillingWallet();
       return {
         prepared: {
-          access: {
+          identity: {
             npub: input.npub,
             publicKey: input.publicKey,
-            isWhitelisted: true,
+          },
+          billing: {
+            required: false,
+            bypassed: true,
             canSkipNftPurchase: true,
           },
           wallet: {
@@ -1220,14 +1226,14 @@ export default function (api: any) {
             oswapForInitialVaultCredit: "0",
             requiredOswap: "0",
             oswapShortfall: "0",
-            note: "Whitelisted access bypasses NFT purchase and vault funding.",
+            note: "No upfront billing setup is required for this account.",
           },
           executionPlan: {
             agentName: input.name,
             mode,
             marketType,
             symbol: input.symbol ?? null,
-            actions: [`Create ${mode} ${marketType} agent directly using whitelist access.`],
+            actions: [`Create ${mode} ${marketType} agent directly.`],
             approvals: [],
             depositToVault: "0",
           },
@@ -1404,10 +1410,13 @@ export default function (api: any) {
     }
 
     const prepared: PreparedAgentCreationResult = {
-      access: {
+      identity: {
         npub: input.npub,
         publicKey: input.publicKey,
-        isWhitelisted: false,
+      },
+      billing: {
+        required: true,
+        bypassed: false,
         canSkipNftPurchase: hasEligibleNft,
       },
       wallet: {
@@ -1617,7 +1626,7 @@ export default function (api: any) {
     },
   });
 
-  // ── Identity & access tools ─────────────────────────────────────
+  // ── Identity tools ─────────────────────────────────────
 
   api.registerTool({
     name: "get_nostr_identity",
@@ -1630,28 +1639,6 @@ export default function (api: any) {
       }
       const publicKey = Keys.getPublicKey(pk);
       return textResult({ npub: Nip19.npubEncode(publicKey), publicKey });
-    },
-  });
-
-  api.registerTool({
-    name: "request_trading_access",
-    description: "Request trading access (waitlist). A whitelisted user or admin must approve at https://agent.openswap.xyz/admin/waitlist",
-    parameters: Type.Object({
-      walletAddress: Type.Optional(Type.String({ description: "Your wallet address (optional)" })),
-    }),
-    async execute(_id: string, params: { walletAddress?: string }) {
-      const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
-      const auth = getAuthHeader(publicKey, privateKey);
-      const res = await fetch(`${baseUrl}/api/waitlist`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: auth },
-        body: JSON.stringify({ npub, walletAddress: params.walletAddress }),
-      });
-      if (!res.ok) throw new Error(`request_trading_access failed: ${res.status} ${await res.text()}`);
-      return textResult({
-        success: true,
-        message: "Access requested. A whitelisted user or admin must approve at https://agent.openswap.xyz/admin/waitlist",
-      });
     },
   });
 
@@ -1743,7 +1730,7 @@ export default function (api: any) {
 
   api.registerTool({
     name: "init_trading_session",
-    description: "Initialize a trading session: check/generate Nostr keys, verify trading access, and optionally list wallets (live mode). Replaces sequential calls to get_or_create_nostr_keys + check_trading_access + list_wallets.",
+    description: "Initialize a trading session: check/generate Nostr keys and optionally list wallets (live mode). Replaces sequential calls to get_or_create_nostr_keys + list_wallets.",
     parameters: Type.Object({
       mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
     }),
@@ -1766,32 +1753,7 @@ export default function (api: any) {
       result.keys = { ok: true, npub, publicKey, generated };
       debugLog("init_trading_session", "keys", { npub, generated });
 
-      // Step 2: Check trading access
-      try {
-        const whitelistUrl = `${baseUrl}/api/is-whitelisted/${npub}`;
-        debugLog("init_trading_session", "api.req /api/is-whitelisted", { url: whitelistUrl });
-        const res = await fetch(whitelistUrl);
-        if (!res.ok) {
-          const errText = await res.text().catch(() => null);
-          debugLog("init_trading_session", "api.res /api/is-whitelisted", { status: res.status, body: errText });
-          result.access = { ok: false, error: `check failed: ${res.status}` };
-          debugLog("init_trading_session", "result", result);
-          return textResult(result);
-        }
-        const data = await res.json();
-        debugLog("init_trading_session", "api.res /api/is-whitelisted", { status: res.status, body: data });
-        result.access = { ok: true, hasAccess: data.isWhitelisted };
-        if (!data.isWhitelisted) {
-          debugLog("init_trading_session", "result", result);
-          return textResult(result);
-        }
-      } catch (e: any) {
-        result.access = { ok: false, error: e.message };
-        debugLog("init_trading_session", "result", result);
-        return textResult(result);
-      }
-
-      // Step 3: If live, list wallets
+      // Step 2: If live, list wallets
       if (mode === "live") {
         try {
           const auth = getAuthHeader(publicKey, pk);
@@ -1996,7 +1958,7 @@ export default function (api: any) {
 
   api.registerTool({
     name: "prepare_agent_creation",
-    description: "Preflight for direct agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, checks whitelist and active /api/nft-config eligibility, calculates OSWAP and vault credit requirements, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction.",
+    description: "Preflight for direct agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
@@ -2039,7 +2001,7 @@ export default function (api: any) {
 
   api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, performing the full billing preflight and cheapest active NFT/vault setup for non-whitelisted users before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Replaces sequential calls to create_agent + notify_trading_bot + register_trader + log_agent_action + get_agent.",
+    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Replaces sequential calls to create_agent + notify_trading_bot + register_trader + log_agent_action + get_agent.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount (auto-fetched for live mode)" })),
@@ -2148,12 +2110,12 @@ export default function (api: any) {
         return textResult({ error: e.message });
       }
 
-      const isWhitelisted = preparedContext.prepared.access.isWhitelisted;
-      if (isWhitelisted) {
+      const billingRequired = preparedContext.prepared.billing.required;
+      if (!billingRequired) {
         result.billing = {
           required: false,
           bypassed: true,
-          reason: "whitelisted_access",
+          reason: "billing_not_required",
         };
       } else {
         const activeBillingWallet = preparedContext.billingWallet;
@@ -2497,7 +2459,7 @@ export default function (api: any) {
         result.verify = { ok: false };
       }
 
-      if (!isWhitelisted && billingWallet) {
+      if (billingRequired && billingWallet) {
         try {
           const [postBalance, subscriptions] = await Promise.all([
             fetchBillingBalanceSnapshot(billingWallet),
@@ -2765,12 +2727,8 @@ export default function (api: any) {
         strategy?: Record<string, unknown>;
       },
     ) {
-      const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
-      const isWhitelisted = await fetchWhitelistStatus(npub);
-      if (!isWhitelisted) {
-        throw new Error("Backtest submission requires whitelist access for the current Nostr identity");
-      }
 
       const normalizedRange = normalizeBacktestTimeRange(
         params.startTime,
