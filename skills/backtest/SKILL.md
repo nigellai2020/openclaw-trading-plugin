@@ -10,14 +10,25 @@ Follow these steps to run a backtest.
 ## Step 1 — Initialize session
 Call `init_trading_session` with mode `"paper"`. Handle the response:
 - **keys.generated = true**: Inform the user a new Nostr identity was created.
-- **access.hasAccess = false**: Inform the user they are not whitelisted for direct agent creation, but continue. Backtesting does not need the NFT/vault billing setup.
+- **access.hasAccess = false**: Inform the user they are not whitelisted for backtest submission and STOP. The backend rejects backtests for non-whitelisted users.
 
 ## Step 2 — Identify the agent
 If the user specified an agent ID, use it. Otherwise ask the user for the agent ID. Call `get_agent` to fetch the agent details (name, strategy, capital).
 
 ## Step 3 — Set backtest parameters
 Ask the user for:
-- **Time range**: start and end time (ISO datetime or unix timestamp)
+- **Time range**: start and end time
+  - Do **not** expect the user to provide ISO timestamps with offsets directly.
+  - Date-only values like `2026-03-20` are allowed
+  - Unix timestamps are allowed
+  - Do **not** ask the user for timezone separately by default.
+  - If the user explicitly mentions any timezone or local-time context, such as `HK time`, `Hong Kong time`, `Toronto time`, `New York time`, `UTC`, `GMT`, or an IANA zone name, OpenClaw must resolve that timezone itself.
+  - When OpenClaw resolves a user-mentioned timezone, call `create_backtest` with:
+    - `startTime` and `endTime` converted into ISO datetimes with explicit offsets for that timezone
+    - `timeZone` set to the resolved timezone so the tool can interpret the request consistently
+  - If the user gives an explicit numeric offset in the timestamp itself, preserve it and still pass `timeZone` if the user also named the timezone separately.
+  - If the user gives no timezone signal at all, pass the date/datetime as given; `create_backtest` will fall back to the OpenClaw runtime timezone, and then to `UTC` if runtime resolution fails.
+  - If the user gives an ambiguous abbreviation like `EST`, `CST`, or `PST`, ask them to clarify instead of guessing.
 - **Initial capital**: or default to the agent's existing capital
 - **Protocol fee** (optional): fee override
 - **Gas fee** (optional): fee override
@@ -26,10 +37,17 @@ Ask the user for:
 If the user wants to test a different strategy, build a new one (indicators, rules, risk_manager). For detailed schema references, see the `strategy-reference` skill. Otherwise use the agent's existing strategy.
 
 ## Step 5 — Confirm before submitting
-Present a summary: agent name/ID, time range, initial capital, fees (if any), and strategy (existing or override). Ask the user to confirm before proceeding. Do NOT call `create_backtest` until the user explicitly confirms.
+Present a summary: agent name/ID, initial capital, fees (if any), strategy (existing or override), and the resolved time interpretation.
+- If the user mentioned a timezone phrase, explicitly say which timezone OpenClaw resolved, and show the interpreted local range in a human-readable format like `2026-03-20 00:00:00 (+08:00)`, not raw ISO strings.
+- If the user gave explicit timezone offsets, say those exact times will be preserved.
+- If the user gave naive dates/times with no timezone phrase, explicitly say OpenClaw will let `create_backtest` interpret them in the runtime timezone and convert them to UTC before submission.
+Ask the user to confirm before proceeding. Do NOT call `create_backtest` until the user explicitly confirms.
 
 ## Step 6 — Submit the backtest
-Call `create_backtest` with agentId, initialCapital, startTime, endTime, and optional protocolFee, gasFee, strategy. Save the returned `jobId`.
+Call `create_backtest` with agentId, initialCapital, startTime, endTime, optional `timeZone`, and optional protocolFee, gasFee, strategy.
+- If OpenClaw resolved a timezone phrase from the user, pass offset-bearing ISO strings plus the resolved `timeZone`.
+- If there was no timezone phrase, pass the user's naive value and let the tool apply runtime-timezone fallback.
+- After submission, keep the response simple: report the `jobId` and status. Do not echo technical lines like `Timezone used` or `Normalized UTC range` unless the user explicitly asks for them.
 
 ## Step 7 — Poll progress and fetch results
 Call `get_backtest_job` with the jobId to poll its progress and status.

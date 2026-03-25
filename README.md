@@ -62,7 +62,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 
 | Tool                  | Description                           |
 | --------------------- | ------------------------------------- |
-| `create_backtest`     | Submit a backtest job                 |
+| `create_backtest`     | Submit a backtest job; if the user mentions a timezone, OpenClaw should resolve it before calling the tool, otherwise naive dates/times fall back to the OpenClaw runtime timezone, then UTC |
 | `get_backtests`       | List backtests for an agent           |
 | `get_backtest_status` | Check backtest job status (batch)     |
 | `get_backtest_job`    | Poll backtest job progress and status |
