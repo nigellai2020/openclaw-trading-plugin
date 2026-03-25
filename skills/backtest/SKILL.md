@@ -40,7 +40,7 @@ If the user wants to test a different strategy, build a new one (indicators, rul
 Present a summary: agent name/ID, initial capital, fees (if any), strategy (existing or override), and the resolved time interpretation.
 - If the user mentioned a timezone phrase, explicitly say which timezone OpenClaw resolved, and show the interpreted local range in a human-readable format like `2026-03-20 00:00:00 (+08:00)`, not raw ISO strings.
 - If the user gave explicit timezone offsets, say those exact times will be preserved.
-- If the user gave naive dates/times with no timezone phrase, explicitly say OpenClaw will let `create_backtest` interpret them in the runtime timezone and convert them to UTC before submission.
+- If the user gave naive dates/times with no timezone phrase, explicitly say OpenClaw will interpret them in the runtime timezone.
 Ask the user to confirm before proceeding. Do NOT call `create_backtest` until the user explicitly confirms.
 
 ## Step 6 — Submit the backtest
