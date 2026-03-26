@@ -90,15 +90,51 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 - Call `prepare_agent_creation` with:
   - Paper: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
   - Live: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
-- Present the returned plan clearly:
-  - whether upfront billing setup is required
-  - if billing is required, whether an NFT mint is needed
-  - how much OSWAP is required
-  - how much BNB is required for swap + gas
-  - what approvals will happen
-  - how much goes into the vault
-  - that the vault deposit becomes billable credit, not a one-time burn
-  - if billing is not required, say no upfront NFT purchase or vault funding is needed for this account
+- If `prepare_agent_creation.billing.required = false`, say no upfront billing setup is required and do not render a checkout card.
+- If `prepare_agent_creation.billing.required = true`, present the returned plan as a mini checkout page when there are real upfront costs. Follow this style and ordering closely. Keep OSWAP charges separate from BNB execution cost.
+
+```md
+💰 *Costs Breakdown*
+
+*1. NFT (required for agent creation)*
+- Show `Using existing eligible NFT` when `nft.hasEligibleNft = true`
+- Otherwise show `fees.oswapForNft` OSWAP
+
+*2. Agent creation fees*
+- Operating fee: `fees.operatingFee` OSWAP
+- Protocol fee: `fees.protocolFee` OSWAP
+- Strategy fee: `fees.strategyFee` OSWAP when greater than `0`
+- *Total fees: `fees.firstBillingAmount` OSWAP*
+
+*🔄 BNB → OSWAP Swap Needed*
+- If `fees.oswapShortfall > 0`, say the user does not have enough OSWAP and needs to swap for `fees.oswapShortfall` OSWAP
+- Estimated: `~funding.bnbForSwapMax` BNB
+
+*⛽ Gas Fees*
+- `~funding.bnbForGas` BNB
+
+*📊 Total BNB Required*
+- Swap: `funding.bnbForSwapMax` BNB
+- Gas: `funding.bnbForGas` BNB
+- *Total: `funding.totalBnbNeeded` BNB*
+
+- If `funding.bnbShortfall > 0`: `👉 You have wallet.bnbBalance BNB — send/add ~funding.bnbShortfall BNB (add buffer for safety)`
+- If `funding.bnbShortfall = 0`: `👉 You have enough BNB for this setup`
+
+*Billing note*
+- The agent creation fees become vault credit for billing. They are not burned.
+- Existing vault credit: `fees.existingVaultCredit` OSWAP
+- Additional vault deposit now: `fees.oswapForInitialVaultCredit` OSWAP
+- Include `fees.note` when helpful
+```
+
+- Render rules:
+  - If `nft.hasEligibleNft = true`, do not show an NFT charge; show `Using existing eligible NFT`.
+  - If `fees.oswapShortfall = 0`, replace the swap section with a short line that existing OSWAP already covers the requirement.
+  - If `funding.bnbShortfall > 0`, make the top-up requirement explicit.
+  - If existing vault credit already covers the first period, still show the first billing amount and say no additional vault deposit is needed.
+  - If `fees.oswapForInitialVaultCredit > 0`, treat it as the amount being added as billing credit now.
+  - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, keep the response simple instead of rendering the full checkout card. A concise summary is fine, for example: existing eligible NFT, existing vault credit covers the first period, and no upfront payment is needed now.
 - If `prepare_agent_creation` reports an `error`, STOP and explain it.
 
 ## Step 8 — Confirm before creating
@@ -108,7 +144,7 @@ Present a summary:
 - Initial capital
 - If paper: market type
 - If live: network, `chainId`, master wallet, agent wallet, leverage
-- If `prepare_agent_creation.billing.required = true`: include the billing summary
+- If `prepare_agent_creation.billing.required = true`: include the mini checkout page
 - If `prepare_agent_creation.billing.required = false`: say no upfront billing setup is required
 
 Ask the user to confirm. Do NOT proceed until they explicitly confirm.
@@ -126,11 +162,12 @@ Important:
 
 Handle the response:
 - **create.ok = false**: Report error and STOP.
-- **billing.required = true**: Present the billing execution result:
-  - NFT minted or existing NFT verified
-  - vault deposit amount and updated vault credit
-  - fee breakdown
+- **billing.required = true**: Present a receipt-style billing result:
+  - billing status: NFT minted or existing NFT verified
+  - vault deposit made and updated vault credit
+  - fee breakdown reused from the preflight checkout
   - next billing date estimate
+  - include any warning returned in `billing.result.warning`
 - **notify.ok = false**: Warn but continue.
 - **registerTrader.ok = false** (live): Warn that settlement registration failed — agent may not trade.
 - Present: agent ID, name, pair, capital, and `create.agentUrl`.
