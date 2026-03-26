@@ -31,6 +31,7 @@ Edit `~/.openclaw/openclaw.json` and add the plugin config:
     "entries": {
       "trading-plugin": {
         "config": {
+          "billingEnvironment": "test",
           "nostrPrivateKey": "${NOSTR_PRIVATE_KEY}",
           "mqttBrokerUrl": "${MQTT_BROKER_URL}", // optional
           "mqttPort": 8883, // optional

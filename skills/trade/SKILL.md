@@ -118,14 +118,18 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 - Gas: `funding.bnbForGas` BNB
 - *Total: `funding.totalBnbNeeded` BNB*
 
-- If `funding.bnbShortfall > 0`: `👉 You have wallet.bnbBalance BNB — send/add ~funding.bnbShortfall BNB (add buffer for safety)`
-- If `funding.bnbShortfall = 0`: `👉 You have enough BNB for this setup`
+- If `funding.bnbShortfall > 0`: `👉 You have wallet.bnbBalance BNB — send/add ~funding.bnbShortfall BNB on wallet.networkLabel (add buffer for safety)`
+- If `funding.bnbShortfall = 0`: `👉 You have enough BNB on wallet.networkLabel for this setup`
 
 *Billing note*
 - The agent creation fees become vault credit for billing. They are not burned.
 - Existing vault credit: `fees.existingVaultCredit` OSWAP
 - Additional vault deposit now: `fees.oswapForInitialVaultCredit` OSWAP
 - Include `fees.note` when helpful
+
+*🔁 Auto Renewal*
+- Billing subscription estimated end time: `subscription.estimatedEndTime`
+- For auto renewal, make sure there is at least `subscription.renewalAmount` OSWAP in the billing wallet by then
 ```
 
 - Render rules:
@@ -134,7 +138,7 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
   - If `funding.bnbShortfall > 0`, make the top-up requirement explicit.
   - If existing vault credit already covers the first period, still show the first billing amount and say no additional vault deposit is needed.
   - If `fees.oswapForInitialVaultCredit > 0`, treat it as the amount being added as billing credit now.
-  - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, keep the response simple instead of rendering the full checkout card. A concise summary is fine, for example: existing eligible NFT, existing vault credit covers the first period, and no upfront payment is needed now.
+  - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, keep the response simple instead of rendering the full checkout card. A concise summary is fine, for example: existing eligible NFT, existing vault credit covers the first period, no upfront payment is needed now, and there should still be at least `subscription.renewalAmount` OSWAP in the billing wallet by `subscription.estimatedEndTime` for auto renewal.
 - If `prepare_agent_creation` reports an `error`, STOP and explain it.
 
 ## Step 8 — Confirm before creating
@@ -167,6 +171,7 @@ Handle the response:
   - vault deposit made and updated vault credit
   - fee breakdown reused from the preflight checkout
   - next billing date estimate
+  - remind the user that there should be at least `billing.result.feeBreakdown.firstBillingAmount` OSWAP in the billing wallet by `billing.result.nextBillingDateEstimate` for auto renewal
   - include any warning returned in `billing.result.warning`
 - **notify.ok = false**: Warn but continue.
 - **registerTrader.ok = false** (live): Warn that settlement registration failed — agent may not trade.

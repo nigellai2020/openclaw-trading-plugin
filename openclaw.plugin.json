@@ -28,6 +28,11 @@
         "type": "string",
         "default": "https://settlement-agent.decom.dev"
       },
+      "billingEnvironment": {
+        "type": "string",
+        "enum": ["test", "prod"],
+        "default": "test"
+      },
       "bscBillingRpcUrl": {
         "type": "string",
         "default": "https://data-seed-prebsc-1-s1.binance.org:8545"

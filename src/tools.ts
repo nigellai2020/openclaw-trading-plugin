@@ -12,6 +12,7 @@ import mqtt from "mqtt";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { resolveBillingStageParams, type BillingEnvironment } from "./billing-stage.js";
 import { SUPPORTED_PAIRS } from "./supported-pairs.js";
 
 // ── Strategy schema ────────────────────────────────────────────────
@@ -146,6 +147,8 @@ const ROUTER_ABI = [
 ];
 
 type BillingEvmConfig = {
+  environment: BillingEnvironment;
+  networkLabel: string;
   rpcUrl: string;
   routerAddress: string;
   wethAddress: string;
@@ -190,6 +193,7 @@ type PreparedAgentCreationResult = {
     address?: string;
     oswapBalance?: string;
     bnbBalance?: string;
+    networkLabel?: string;
     usesNostrPrivateKey: boolean;
   };
   nft: {
@@ -216,6 +220,11 @@ type PreparedAgentCreationResult = {
     requiredOswap: string;
     oswapShortfall: string;
     note: string;
+  };
+  subscription?: {
+    estimatedEndTime: string;
+    renewalPeriodDays: number;
+    renewalAmount: string;
   };
   funding?: {
     bnbForSwapQuoted: string;
@@ -348,7 +357,10 @@ function sanitizeForLog(data: unknown): unknown {
 }
 
 function buildBillingEvmConfig(pluginConfig: any): BillingEvmConfig {
+  const stage = resolveBillingStageParams(pluginConfig.billingEnvironment);
   return {
+    environment: stage.environment,
+    networkLabel: stage.networkLabel,
     rpcUrl: pluginConfig.bscBillingRpcUrl ?? DEFAULT_BSC_BILLING_RPC_URL,
     routerAddress: pluginConfig.bscBillingRouterAddress ?? DEFAULT_BSC_ROUTER_ADDRESS,
     wethAddress: pluginConfig.bscBillingWethAddress ?? DEFAULT_BSC_WETH_ADDRESS,
@@ -1208,6 +1220,7 @@ export default function (api: any) {
           },
           wallet: {
             address: billingWallet.address,
+            networkLabel: billingEvmConfig.networkLabel,
             usesNostrPrivateKey: true,
           },
           nft: {
@@ -1326,6 +1339,8 @@ export default function (api: any) {
     }
 
     const gasPriceWei = feeData.gasPrice ?? feeData.maxFeePerGas ?? 5_000_000_000n;
+    const renewalPeriodDays = Math.round(feeQuote.periodSeconds / 86_400);
+    const estimatedEndTime = new Date(Date.now() + feeQuote.periodSeconds * 1_000).toISOString();
     const swapDeadline = Math.floor(Date.now() / 1000) + 1_200;
     const gas = {
       swap: await estimateStepCost(
@@ -1423,6 +1438,7 @@ export default function (api: any) {
         address: billingWallet.address,
         oswapBalance: formatAmount(walletOswapBalanceRaw, billingEvmConfig.tokenDecimals),
         bnbBalance: formatAmount(walletBnbBalanceRaw, 18, 8),
+        networkLabel: billingEvmConfig.networkLabel,
         usesNostrPrivateKey: true,
       },
       nft: {
@@ -1448,7 +1464,12 @@ export default function (api: any) {
         oswapForInitialVaultCredit: formatAmount(oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
         requiredOswap: formatAmount(requiredOswapRaw, billingEvmConfig.tokenDecimals),
         oswapShortfall: formatAmount(oswapShortfallRaw, billingEvmConfig.tokenDecimals),
-        note: `Vault deposits become billable ${feeQuote.tokenSymbol} credit. The initial deposit target equals the first billing amount: ${formatAmount(firstBillingAmountRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} every ${Math.round(feeQuote.periodSeconds / 86_400)} days.`,
+        note: `Vault deposits become billable ${feeQuote.tokenSymbol} credit. The initial deposit target equals the first billing amount: ${formatAmount(firstBillingAmountRaw, billingEvmConfig.tokenDecimals)} ${feeQuote.tokenSymbol} every ${renewalPeriodDays} days.`,
+      },
+      subscription: {
+        estimatedEndTime,
+        renewalPeriodDays,
+        renewalAmount: formatAmount(firstBillingAmountRaw, billingEvmConfig.tokenDecimals),
       },
       funding: {
         bnbForSwapQuoted: formatAmount(bnbForSwapQuotedRaw, 18, 8),
@@ -2139,7 +2160,7 @@ export default function (api: any) {
 
         if (preparedContext.bnbShortfallRaw > 0n) {
           return textResult({
-            error: `Insufficient BNB. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB`,
+            error: `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`,
             ...result,
           });
         }

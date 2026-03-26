@@ -22,6 +22,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
         config: {
           baseUrl: "https://agent02.decom.dev",
           tradingBotUrl: "https://trading-agent.decom.dev",
+          billingEnvironment: "test", // "test" or "prod"
           nostrPrivateKey: "${NOSTR_PRIVATE_KEY}",
           walletAgentUrl: "https://wallet-agent.decom.dev",
           settlementEngineUrl: "https://settlement-agent.decom.dev",
