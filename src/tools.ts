@@ -2750,6 +2750,8 @@ export default function (api: any) {
     ) {
       const { privateKey, publicKey } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
+      const billingWallet = buildBillingWallet();
+      const billingHeaders = await buildBillingHeaders(billingWallet);
 
       const normalizedRange = normalizeBacktestTimeRange(
         params.startTime,
@@ -2783,7 +2785,11 @@ export default function (api: any) {
 
       const res = await fetch(`${baseUrl}/api/backtest`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: auth },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: auth,
+          ...billingHeaders,
+        },
         body: JSON.stringify(payload),
       });
       if (!res.ok)
