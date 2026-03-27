@@ -57,6 +57,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | `setup_live_wallet`       | Store agent wallet key in TEE and register in backend                       |
 | `deploy_agent`            | Create agent, run any required billing setup, notify bot, register trader (live), log action, verify |
 | `get_agent`               | Get agent details by ID                                                     |
+| `update_agent`            | Update only the requested agent fields across the supported backends        |
 | `get_hyperliquid_balance` | Get USDC balance of a Hyperliquid master wallet                             |
 
 ### Backtesting

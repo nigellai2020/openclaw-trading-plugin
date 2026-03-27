@@ -97,6 +97,12 @@ const SimulationConfig = Type.Object({
   chain_id: Type.Optional(Type.Number({ description: "Uniswap: 1 (Ethereum), 56 (BSC), 8453 (Base), 42161 (Arbitrum). Hyperliquid: 998 (testnet), 999 (mainnet). Not needed for stocks." })),
 });
 
+const SimulationConfigPatch = Type.Object({
+  asset_type: Type.Optional(Type.String({ description: 'Optional partial update for simulation asset type: "crypto" or "stocks"' })),
+  protocol: Type.Optional(Type.String({ description: 'Optional partial update for simulation protocol: "uniswap" or "hyperliquid"' })),
+  chain_id: Type.Optional(Type.Number({ description: "Optional partial update for simulation chain ID" })),
+});
+
 // ── Constants ──────────────────────────────────────────────────────
 
 const DEFAULT_BASE_URL = "https://agent02.decom.dev";
@@ -914,6 +920,129 @@ export default function (api: any) {
       throw new Error("Invalid chainId for live mode. Use 998 for Hyperliquid testnet or 999 for Hyperliquid mainnet");
     }
     return chainId;
+  }
+
+  function hasOwnField<T extends object>(value: T, key: string): boolean {
+    return Object.prototype.hasOwnProperty.call(value, key);
+  }
+
+  function normalizeAddress(value?: string | null): string | null {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim();
+    return normalized ? normalized.toLowerCase() : null;
+  }
+
+  function inferSymbolFromStrategy(strategy: unknown): string | undefined {
+    if (!strategy || typeof strategy !== "object") return undefined;
+    const symbol = (strategy as { symbol?: unknown }).symbol;
+    return typeof symbol === "string" && symbol.trim() ? symbol.trim() : undefined;
+  }
+
+  function inferAssetTypeFromSymbol(symbol?: string): "crypto" | "stocks" | undefined {
+    if (!symbol) return undefined;
+    return SUPPORTED_PAIRS.find((pair) => pair.symbol === symbol)?.asset_type;
+  }
+
+  function normalizeSimulationProtocol(protocol?: string): string | undefined {
+    if (!protocol) return undefined;
+    return protocol.toLowerCase() === "hyperliquid" ? "hyperliquid" : "uniswap";
+  }
+
+  function inferLiveProtocol(input: {
+    protocol?: string;
+    marketType?: "spot" | "perp";
+    chainId?: number | null;
+    walletNetwork?: string | null;
+  }): string | undefined {
+    if (input.protocol) return input.protocol;
+    if (input.walletNetwork === "mainnet" || input.walletNetwork === "testnet") {
+      return "hyperliquid";
+    }
+    if (input.chainId === 998 || input.chainId === 999) {
+      return "hyperliquid";
+    }
+    if (input.marketType === "perp") {
+      return "hyperliquid";
+    }
+    return undefined;
+  }
+
+  function buildDerivedSimulationConfig(input: {
+    symbol?: string;
+    marketType: "spot" | "perp";
+    chainId?: number | null;
+    protocol?: string;
+    patch?: {
+      asset_type?: string;
+      protocol?: string;
+      chain_id?: number;
+    };
+  }): Record<string, unknown> {
+    const explicitAssetType = input.patch?.asset_type;
+    const inferredAssetType = explicitAssetType ?? inferAssetTypeFromSymbol(input.symbol) ?? "crypto";
+    if (inferredAssetType === "stocks") {
+      return { asset_type: "stocks" };
+    }
+
+    const protocol = normalizeSimulationProtocol(
+      input.patch?.protocol ?? input.protocol ?? (input.marketType === "perp" ? "hyperliquid" : undefined),
+    ) ?? (input.marketType === "perp" ? "hyperliquid" : "uniswap");
+
+    let chainId = input.patch?.chain_id ?? input.chainId ?? null;
+    if (protocol === "hyperliquid") {
+      chainId = chainId === 999 ? 999 : 998;
+    } else if (chainId == null || chainId === 998 || chainId === 999) {
+      chainId = 1;
+    }
+
+    return {
+      asset_type: "crypto",
+      protocol,
+      chain_id: chainId,
+    };
+  }
+
+  function resolveWalletRecord(
+    wallets: any[],
+    input: { walletId?: number | null; walletAddress?: string | null },
+  ): any | undefined {
+    const normalizedWalletAddress = normalizeAddress(input.walletAddress);
+    return wallets.find((wallet) => {
+      if (input.walletId != null && Number(wallet.id) === input.walletId) {
+        return true;
+      }
+      if (normalizedWalletAddress && typeof wallet.wallet_address === "string") {
+        return wallet.wallet_address.toLowerCase() === normalizedWalletAddress;
+      }
+      return false;
+    });
+  }
+
+  async function parseResponseBody(res: Response): Promise<any> {
+    return await res.json().catch(async () => await res.text().catch(() => null));
+  }
+
+  async function fetchAgentSettingsForUpdate(auth: string, agentId: number): Promise<any> {
+    const res = await fetch(`${baseUrl}/api/agent/settings/${agentId}`, {
+      headers: { Authorization: auth },
+    });
+    const body = await parseResponseBody(res);
+    if (!res.ok) {
+      throw new Error(`get_agent_settings failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+    return extractApiData(body);
+  }
+
+  async function fetchWalletsForUpdate(auth: string): Promise<any[]> {
+    const res = await fetch(`${baseUrl}/api/wallets?includeAuthorizedAgents=true`, {
+      headers: { Authorization: auth },
+    });
+    const body = await parseResponseBody(res);
+    if (!res.ok) {
+      throw new Error(`list_wallets failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+    const data = extractApiData<any[]>(body);
+    return Array.isArray(data) ? data : [];
   }
 
   function buildBillingWallet(): Wallet {
@@ -1744,6 +1873,779 @@ export default function (api: any) {
       const res = await fetch(`${baseUrl}/api/agent/${params.agentId}`);
       if (!res.ok) throw new Error(`get_agent failed: ${res.status}`);
       return textResult(await res.json());
+    },
+  });
+
+  api.registerTool({
+    name: "update_agent",
+    description: "Update a trading agent across the supported backends. Only explicitly provided fields are updated.",
+    parameters: Type.Object({
+      agentId: Type.Number({ description: "Agent ID to update" }),
+      name: Type.Optional(Type.String({ description: "Updated agent name" })),
+      description: Type.Optional(Type.String({ description: "Updated agent description" })),
+      avatarUrl: Type.Optional(Type.String({ description: "Updated avatar URL" })),
+      strategy: Type.Optional(Strategy),
+      strategyDescription: Type.Optional(Type.String({ description: "Updated human-readable strategy description" })),
+      isActive: Type.Optional(Type.Boolean({ description: "Enable or disable the agent" })),
+      leverage: Type.Optional(Type.Number({ description: "Updated leverage multiplier" })),
+      strategyFeePerPeriod: Type.Optional(Type.Union([
+        Type.Number({ description: "Updated strategy fee per billing period" }),
+        Type.Null(),
+      ])),
+      mode: Type.Optional(Type.String({ description: '"paper" or "live"' })),
+      marketType: Type.Optional(Type.String({ description: '"spot" or "perp"' })),
+      symbol: Type.Optional(Type.String({ description: 'Updated trader symbol, e.g. "ETH/USDC"' })),
+      chainId: Type.Optional(Type.Number({ description: "Updated settlement/simulation chain ID" })),
+      protocol: Type.Optional(Type.String({ description: 'Updated protocol, e.g. "hyperliquid" or "uniswap_v3"' })),
+      buyLimit: Type.Optional(Type.Number({ description: "Updated live-trading buy limit in USD" })),
+      walletId: Type.Optional(Type.Number({ description: "Wallet ID to resolve walletAddress/masterWalletAddress from" })),
+      walletAddress: Type.Optional(Type.String({ description: "Updated agent/API wallet address" })),
+      masterWalletAddress: Type.Optional(Type.String({ description: "Updated master wallet address used by settlement" })),
+      simulationConfig: Type.Optional(SimulationConfigPatch),
+      positionQty: Type.Optional(Type.Number({ description: "Updated settlement position quantity" })),
+      slippage: Type.Optional(Type.Number({ description: "Updated settlement slippage tolerance" })),
+      expiration: Type.Optional(Type.Number({ description: "Updated settlement transaction expiration in seconds" })),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        agentId: number;
+        name?: string;
+        description?: string;
+        avatarUrl?: string;
+        strategy?: Record<string, unknown>;
+        strategyDescription?: string;
+        isActive?: boolean;
+        leverage?: number;
+        strategyFeePerPeriod?: number | null;
+        mode?: string;
+        marketType?: string;
+        symbol?: string;
+        chainId?: number;
+        protocol?: string;
+        buyLimit?: number;
+        walletId?: number;
+        walletAddress?: string;
+        masterWalletAddress?: string;
+        simulationConfig?: {
+          asset_type?: string;
+          protocol?: string;
+          chain_id?: number;
+        };
+        positionQty?: number;
+        slippage?: number;
+        expiration?: number;
+      },
+    ) {
+      const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const signedAt = Math.floor(Date.now() / 1000);
+      const requestedFields = [
+        "name",
+        "description",
+        "avatarUrl",
+        "strategy",
+        "strategyDescription",
+        "isActive",
+        "leverage",
+        "strategyFeePerPeriod",
+        "mode",
+        "marketType",
+        "symbol",
+        "chainId",
+        "protocol",
+        "buyLimit",
+        "walletId",
+        "walletAddress",
+        "masterWalletAddress",
+        "simulationConfig",
+        "positionQty",
+        "slippage",
+        "expiration",
+      ].filter((field) => hasOwnField(params, field));
+
+      if (requestedFields.length === 0) {
+        return textResult({ error: "At least one updatable field is required" });
+      }
+      if (params.mode != null && params.mode !== "paper" && params.mode !== "live") {
+        return textResult({ error: 'mode must be "paper" or "live"' });
+      }
+      if (params.marketType != null && params.marketType !== "spot" && params.marketType !== "perp") {
+        return textResult({ error: 'marketType must be "spot" or "perp"' });
+      }
+      if (
+        params.simulationConfig?.asset_type != null &&
+        params.simulationConfig.asset_type !== "crypto" &&
+        params.simulationConfig.asset_type !== "stocks"
+      ) {
+        return textResult({ error: 'simulationConfig.asset_type must be "crypto" or "stocks"' });
+      }
+
+      debugLog("update_agent", "entry", { requestedFields, ...params });
+
+      const result: Record<string, any> = {
+        preflight: {
+          agentId: params.agentId,
+          requestedFields,
+        },
+        warnings: [] as string[],
+      };
+      const warnings = result.warnings as string[];
+
+      let currentSettings: any;
+      let publicAgentBody: any = null;
+      let wallets: any[] = [];
+
+      try {
+        const [settings, publicAgentRes] = await Promise.all([
+          fetchAgentSettingsForUpdate(auth, params.agentId),
+          fetch(`${baseUrl}/api/agent/${params.agentId}`)
+            .then(async (res) => await parseResponseBody(res))
+            .catch(() => null),
+        ]);
+        currentSettings = settings;
+        publicAgentBody = publicAgentRes;
+      } catch (e: any) {
+        result.error = e.message;
+        debugLog("update_agent", "preflight.error", result);
+        return textResult(result);
+      }
+
+      try {
+        wallets = await fetchWalletsForUpdate(auth);
+      } catch (e: any) {
+        warnings.push(`Could not load wallets for update preflight: ${e.message}`);
+      }
+
+      const currentMode: "paper" | "live" = currentSettings?.mode === "live" ? "live" : "paper";
+      const targetMode: "paper" | "live" = params.mode === "live"
+        ? "live"
+        : params.mode === "paper"
+          ? "paper"
+          : currentMode;
+      const currentMarketType: "spot" | "perp" = currentSettings?.marketType === "perp" ? "perp" : "spot";
+      const targetMarketType: "spot" | "perp" = params.marketType === "perp"
+        ? "perp"
+        : params.marketType === "spot"
+          ? "spot"
+          : currentMarketType;
+
+      const currentWalletRecord = resolveWalletRecord(wallets, {
+        walletId: currentSettings?.walletId,
+        walletAddress: currentSettings?.walletAddress,
+      });
+      const requestedWalletRecord = resolveWalletRecord(wallets, {
+        walletId: params.walletId,
+        walletAddress: params.walletAddress,
+      });
+      if (params.walletId != null && !requestedWalletRecord) {
+        return textResult({
+          ...result,
+          error: `walletId ${params.walletId} was not found in the current wallet list`,
+        });
+      }
+      if (
+        params.walletId != null &&
+        params.walletAddress &&
+        requestedWalletRecord &&
+        normalizeAddress(requestedWalletRecord.wallet_address) !== normalizeAddress(params.walletAddress)
+      ) {
+        return textResult({
+          ...result,
+          error: "walletId and walletAddress refer to different wallets",
+        });
+      }
+
+      const resolvedWalletRecord = requestedWalletRecord ?? currentWalletRecord;
+      const nextStrategy = hasOwnField(params, "strategy") ? params.strategy : currentSettings?.strategy;
+      const currentSymbol = inferSymbolFromStrategy(currentSettings?.strategy);
+      const resolvedSymbol = params.symbol ?? inferSymbolFromStrategy(nextStrategy) ?? currentSymbol ?? null;
+      const resolvedChainId = hasOwnField(params, "chainId") ? params.chainId ?? null : currentSettings?.chainId ?? null;
+      const resolvedWalletId = hasOwnField(params, "walletId") ? params.walletId ?? null : currentSettings?.walletId ?? null;
+      const resolvedWalletAddress =
+        params.walletAddress ??
+        requestedWalletRecord?.wallet_address ??
+        currentSettings?.walletAddress ??
+        currentWalletRecord?.wallet_address ??
+        null;
+      const resolvedMasterWalletAddress =
+        params.masterWalletAddress ??
+        requestedWalletRecord?.master_wallet_address ??
+        currentWalletRecord?.master_wallet_address ??
+        null;
+      const resolvedWalletNetwork =
+        requestedWalletRecord?.hyperliquid_network ??
+        currentWalletRecord?.hyperliquid_network ??
+        null;
+      const resolvedBuyLimit = hasOwnField(params, "buyLimit")
+        ? params.buyLimit ?? null
+        : currentSettings?.buyLimit ?? null;
+      const resolvedLeverage = hasOwnField(params, "leverage")
+        ? params.leverage ?? null
+        : currentSettings?.leverage ?? null;
+      const resolvedProtocol = params.protocol ?? inferLiveProtocol({
+        protocol: params.protocol,
+        marketType: targetMarketType,
+        chainId: resolvedChainId,
+        walletNetwork: resolvedWalletNetwork,
+      });
+
+      const currentWalletAddress =
+        currentSettings?.walletAddress ??
+        currentWalletRecord?.wallet_address ??
+        null;
+      const currentMasterWalletAddress = currentWalletRecord?.master_wallet_address ?? null;
+
+      const mainFieldKeys = [
+        "name",
+        "description",
+        "avatarUrl",
+        "strategy",
+        "strategyDescription",
+        "isActive",
+        "leverage",
+        "strategyFeePerPeriod",
+      ];
+      const botDirectFieldKeys = [
+        "name",
+        "avatarUrl",
+        "strategy",
+        "strategyDescription",
+        "isActive",
+        "mode",
+        "marketType",
+        "leverage",
+      ];
+      const settlementConfigFieldKeys = [
+        "walletId",
+        "walletAddress",
+        "masterWalletAddress",
+        "symbol",
+        "chainId",
+        "protocol",
+        "buyLimit",
+      ];
+
+      if (hasOwnField(params, "mode")) {
+        warnings.push("mode is only updateable on the trading-bot; trading-data will continue to report the existing mode.");
+      }
+      if (hasOwnField(params, "marketType")) {
+        warnings.push("marketType is not updateable via trading-data. For live agents the settlement trader is recreated because the settlement PATCH API does not support market_type.");
+      }
+      const dataApiLimitedFields = [
+        "symbol",
+        "chainId",
+        "protocol",
+        "buyLimit",
+        "walletId",
+        "walletAddress",
+        "masterWalletAddress",
+        "simulationConfig",
+        "positionQty",
+        "slippage",
+        "expiration",
+      ].filter((field) => hasOwnField(params, field));
+      if (dataApiLimitedFields.length > 0) {
+        warnings.push(`trading-data does not persist these update fields: ${dataApiLimitedFields.join(", ")}`);
+      }
+      if (hasOwnField(params, "simulationConfig")) {
+        warnings.push("simulationConfig is only updateable on the trading-bot.");
+      }
+      if (hasOwnField(params, "walletId")) {
+        warnings.push("walletId is used only to resolve walletAddress/masterWalletAddress for supported runtime backends; there is no direct walletId update endpoint for agents.");
+      }
+
+      const needsSettlementConfig =
+        settlementConfigFieldKeys.some((field) => hasOwnField(params, field)) ||
+        (hasOwnField(params, "mode") && targetMode === "live") ||
+        (hasOwnField(params, "marketType") && targetMode === "live");
+
+      const needsSimulationConfig =
+        hasOwnField(params, "simulationConfig") ||
+        ((hasOwnField(params, "mode") && targetMode === "paper") ||
+          (targetMode === "paper" &&
+            (hasOwnField(params, "marketType") ||
+              hasOwnField(params, "chainId") ||
+              hasOwnField(params, "protocol"))));
+
+      let settlementConfigPayload: Record<string, unknown> | undefined;
+      if (needsSettlementConfig) {
+        const missing: string[] = [];
+        if (!resolvedWalletAddress) missing.push("walletAddress");
+        if (!resolvedMasterWalletAddress) missing.push("masterWalletAddress");
+        if (!resolvedSymbol) missing.push("symbol");
+        if (resolvedChainId == null) missing.push("chainId");
+        if (resolvedBuyLimit == null) missing.push("buyLimit");
+        if (missing.length > 0) {
+          return textResult({
+            ...result,
+            error: `Cannot update settlement_config safely. Missing companion fields: ${missing.join(", ")}`,
+          });
+        }
+
+        settlementConfigPayload = {
+          eth_address: resolvedMasterWalletAddress,
+          agent_address: resolvedWalletAddress,
+          symbol: resolvedSymbol,
+          chain_id: resolvedChainId,
+          buy_limit_usd: resolvedBuyLimit,
+        };
+        if (resolvedProtocol) {
+          settlementConfigPayload.protocol = resolvedProtocol;
+        } else {
+          warnings.push("protocol was not provided or inferable for settlement_config and will be omitted.");
+        }
+      }
+
+      let simulationConfigPayload: Record<string, unknown> | undefined;
+      if (needsSimulationConfig) {
+        simulationConfigPayload = buildDerivedSimulationConfig({
+          symbol: resolvedSymbol ?? undefined,
+          marketType: targetMarketType,
+          chainId: resolvedChainId,
+          protocol: params.protocol,
+          patch: params.simulationConfig,
+        });
+      }
+
+      result.preflight.current = {
+        mode: currentMode,
+        marketType: currentMarketType,
+        symbol: currentSymbol ?? null,
+        chainId: currentSettings?.chainId ?? null,
+        walletId: currentSettings?.walletId ?? null,
+        walletAddress: currentWalletAddress,
+        masterWalletAddress: currentMasterWalletAddress,
+        buyLimit: currentSettings?.buyLimit ?? null,
+        leverage: currentSettings?.leverage ?? null,
+        isActive: currentSettings?.isActive ?? null,
+      };
+      result.preflight.target = {
+        mode: targetMode,
+        marketType: targetMarketType,
+        symbol: resolvedSymbol,
+        chainId: resolvedChainId,
+        walletId: resolvedWalletId,
+        walletAddress: resolvedWalletAddress,
+        masterWalletAddress: resolvedMasterWalletAddress,
+        buyLimit: resolvedBuyLimit,
+        protocol: resolvedProtocol ?? null,
+        leverage: resolvedLeverage,
+      };
+      if (settlementConfigPayload) {
+        result.preflight.derivedSettlementConfig = settlementConfigPayload;
+      }
+      if (simulationConfigPayload) {
+        result.preflight.derivedSimulationConfig = simulationConfigPayload;
+      }
+
+      const mainUpdateRequested = mainFieldKeys.some((field) => hasOwnField(params, field));
+      if (mainUpdateRequested) {
+        const tradingDataResult: Record<string, unknown> = {};
+        let billingHeaders: Record<string, string> = {};
+        try {
+          const billingWallet = buildBillingWallet();
+          tradingDataResult.billingWalletRegistration = await ensureBillingWalletRegistered({
+            npub,
+            publicKey,
+            privateKey,
+            wallet: billingWallet,
+          });
+          billingHeaders = await buildBillingHeaders(billingWallet);
+        } catch (e: any) {
+          tradingDataResult.billingWarning = e.message;
+          warnings.push(`Billing wallet registration failed before trading-data update: ${e.message}`);
+        }
+
+        const logSignature = Signer.getSignature(
+          {
+            agent_id: params.agentId,
+            action: "update",
+            user: npub,
+            timestamp: signedAt,
+          },
+          privateKey,
+          {
+            agent_id: "number",
+            action: "string",
+            user: "string",
+            timestamp: "number",
+          } as const,
+        );
+
+        const body: Record<string, unknown> = {
+          id: params.agentId,
+          signature: logSignature,
+          timestamp: signedAt,
+        };
+        if (hasOwnField(params, "name")) body.name = params.name;
+        if (hasOwnField(params, "description")) body.description = params.description;
+        if (hasOwnField(params, "avatarUrl")) body.avatarUrl = params.avatarUrl;
+        if (hasOwnField(params, "strategy")) body.strategy = params.strategy;
+        if (hasOwnField(params, "strategyDescription")) body.strategyDescription = params.strategyDescription;
+        if (hasOwnField(params, "isActive")) body.isActive = params.isActive;
+        if (hasOwnField(params, "leverage")) body.leverage = params.leverage;
+        if (hasOwnField(params, "strategyFeePerPeriod")) body.strategyFeePerPeriod = params.strategyFeePerPeriod;
+
+        debugLog("update_agent", "trading-data.req", { url: `${baseUrl}/api/agent`, body, hasBillingHeaders: Object.keys(billingHeaders).length > 0 });
+        const res = await fetch(`${baseUrl}/api/agent`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: auth,
+            ...billingHeaders,
+          },
+          body: JSON.stringify(body),
+        });
+        const responseBody = await parseResponseBody(res);
+        const ok = res.ok && responseBody?.success !== false;
+        result.tradingData = {
+          ...tradingDataResult,
+          ok,
+          status: res.status,
+          body: responseBody,
+        };
+        debugLog("update_agent", "trading-data.res", result.tradingData);
+        if (!ok) {
+          result.warnings = Array.from(new Set(warnings));
+          debugLog("update_agent", "result", result);
+          return textResult(result);
+        }
+      } else {
+        result.tradingData = { skipped: true };
+      }
+
+      const botNeedsUpdate =
+        botDirectFieldKeys.some((field) => hasOwnField(params, field)) ||
+        settlementConfigPayload != null ||
+        simulationConfigPayload != null;
+      if (botNeedsUpdate) {
+        const botBody: Record<string, unknown> = {
+          signed_at: signedAt,
+        };
+        if (hasOwnField(params, "name")) botBody.name = params.name;
+        if (hasOwnField(params, "avatarUrl")) botBody.avatar_url = params.avatarUrl;
+        if (hasOwnField(params, "strategy")) botBody.strategy_config = params.strategy;
+        if (hasOwnField(params, "strategyDescription")) botBody.description = params.strategyDescription;
+        if (hasOwnField(params, "mode")) botBody.mode = targetMode;
+        if (hasOwnField(params, "isActive")) botBody.active = params.isActive;
+        if (hasOwnField(params, "marketType")) botBody.market_type = targetMarketType;
+        if (hasOwnField(params, "leverage")) botBody.leverage = params.leverage;
+        if (settlementConfigPayload) botBody.settlement_config = JSON.stringify(settlementConfigPayload);
+        if (simulationConfigPayload) botBody.simulation_config = simulationConfigPayload;
+
+        const botSignature = Signer.getSignature(
+          {
+            agent_id: params.agentId,
+            signed_at: signedAt,
+          },
+          privateKey,
+          {
+            agent_id: "number",
+            signed_at: "number",
+          } as const,
+        );
+
+        debugLog("update_agent", "trading-bot.req", { url: `${tradingBotUrl}/agents/${params.agentId}`, body: botBody });
+        const res = await fetch(`${tradingBotUrl}/agents/${params.agentId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "x-public-key": publicKey,
+            "x-signature": botSignature,
+          },
+          body: JSON.stringify(botBody),
+        });
+        const responseBody = await parseResponseBody(res);
+        const ok = res.ok && responseBody?.success !== false;
+        result.tradingBot = {
+          ok,
+          status: res.status,
+          body: responseBody,
+        };
+        debugLog("update_agent", "trading-bot.res", result.tradingBot);
+      } else {
+        result.tradingBot = { skipped: true };
+      }
+
+      const currentIsLive = currentMode === "live";
+      const targetIsLive = targetMode === "live";
+      const marketTypeChanged = targetMarketType !== currentMarketType;
+      const masterWalletChanged =
+        targetIsLive &&
+        normalizeAddress(resolvedMasterWalletAddress) !== normalizeAddress(currentMasterWalletAddress) &&
+        (hasOwnField(params, "masterWalletAddress") || hasOwnField(params, "walletId"));
+      const agentAddressChanged =
+        targetIsLive &&
+        normalizeAddress(resolvedWalletAddress) !== normalizeAddress(currentWalletAddress) &&
+        (hasOwnField(params, "walletAddress") || hasOwnField(params, "walletId"));
+
+      const settlementCreateNeeded = !currentIsLive && targetIsLive;
+      const settlementDeleteNeeded = currentIsLive && !targetIsLive;
+      const settlementRecreateNeeded = currentIsLive && targetIsLive && (marketTypeChanged || masterWalletChanged);
+      const settlementPatchNeeded =
+        currentIsLive &&
+        targetIsLive &&
+        !settlementRecreateNeeded &&
+        (
+          agentAddressChanged ||
+          hasOwnField(params, "symbol") ||
+          hasOwnField(params, "chainId") ||
+          hasOwnField(params, "protocol") ||
+          hasOwnField(params, "buyLimit") ||
+          hasOwnField(params, "positionQty") ||
+          hasOwnField(params, "slippage") ||
+          hasOwnField(params, "expiration") ||
+          hasOwnField(params, "leverage") ||
+          hasOwnField(params, "isActive")
+        );
+
+      const settlementActionNeeded =
+        settlementCreateNeeded ||
+        settlementDeleteNeeded ||
+        settlementRecreateNeeded ||
+        settlementPatchNeeded;
+
+      if (!settlementActionNeeded) {
+        result.settlement = { skipped: true };
+        if (settlementConfigFieldKeys.some((field) => hasOwnField(params, field)) && !targetIsLive) {
+          warnings.push("Requested live settlement fields were applied only to the trading-bot because the agent remains in paper mode.");
+        }
+      } else {
+        const settlementResult: Record<string, any> = {
+          skipped: false,
+          action: settlementRecreateNeeded
+            ? "recreate"
+            : settlementCreateNeeded
+              ? "create"
+              : settlementDeleteNeeded
+                ? "delete"
+                : "patch",
+          ok: true,
+          steps: [] as Array<Record<string, unknown>>,
+        };
+        const settlementDeleteSignature = Signer.getSignature(
+          {
+            trader_id: params.agentId,
+            signed_at: signedAt,
+          },
+          privateKey,
+          {
+            trader_id: "number",
+            signed_at: "number",
+          } as const,
+        );
+
+        const settleStep = async (
+          step: string,
+          url: string,
+          init: RequestInit,
+          acceptNotFound = false,
+        ): Promise<boolean> => {
+          debugLog("update_agent", `settlement.${step}.req`, { url, method: init.method, body: init.body });
+          const res = await fetch(url, init);
+          const body = await parseResponseBody(res);
+          const message = responseErrorMessage(body).toLowerCase();
+          const ok = res.ok && body?.result !== false;
+          const allowedNotFound = acceptNotFound && message.includes("not found");
+          const finalOk = ok || allowedNotFound;
+          settlementResult.steps.push({
+            step,
+            ok: finalOk,
+            status: res.status,
+            body,
+            toleratedNotFound: allowedNotFound || undefined,
+          });
+          debugLog("update_agent", `settlement.${step}.res`, {
+            step,
+            ok: finalOk,
+            status: res.status,
+            body,
+            toleratedNotFound: allowedNotFound,
+          });
+          if (!finalOk) {
+            settlementResult.ok = false;
+          } else if (allowedNotFound) {
+            warnings.push(`Settlement step "${step}" reported trader not found; continuing with best-effort recreation.`);
+          }
+          return finalOk;
+        };
+
+        if (settlementDeleteNeeded || settlementRecreateNeeded) {
+          const deleteBody = {
+            trader_id: params.agentId,
+            signed_at: signedAt,
+          };
+          const deleteOk = await settleStep(
+            "delete",
+            `${settlementEngineUrl}/traders/${params.agentId}`,
+            {
+              method: "DELETE",
+              headers: {
+                "Content-Type": "application/json",
+                "x-public-key": publicKey,
+                "x-signature": settlementDeleteSignature,
+              },
+              body: JSON.stringify(deleteBody),
+            },
+            settlementRecreateNeeded,
+          );
+          if (!deleteOk) {
+            result.settlement = settlementResult;
+            result.warnings = Array.from(new Set(warnings));
+            debugLog("update_agent", "result", result);
+            return textResult(result);
+          }
+        }
+
+        if (settlementCreateNeeded || settlementRecreateNeeded) {
+          const missing: string[] = [];
+          if (!resolvedMasterWalletAddress) missing.push("masterWalletAddress");
+          if (!resolvedWalletAddress) missing.push("walletAddress");
+          if (!resolvedSymbol) missing.push("symbol");
+          if (resolvedChainId == null) missing.push("chainId");
+          if (resolvedBuyLimit == null) missing.push("buyLimit");
+          if (missing.length > 0) {
+            return textResult({
+              ...result,
+              settlement: settlementResult,
+              error: `Cannot create live settlement trader. Missing companion fields: ${missing.join(", ")}`,
+            });
+          }
+
+          const createBody: Record<string, unknown> = {
+            trader_id: params.agentId,
+            owner: npub,
+            eth_address: resolvedMasterWalletAddress,
+            agent_address: resolvedWalletAddress,
+            symbol: resolvedSymbol,
+            chain_id: resolvedChainId,
+            market_type: targetMarketType,
+            venue_type: targetMarketType === "perp" ? "dex_orderbook" : "dex_amm",
+            buy_limit_usd: resolvedBuyLimit,
+            signed_at: signedAt,
+          };
+          if (resolvedProtocol) createBody.protocol = resolvedProtocol;
+          if (resolvedLeverage != null) createBody.leverage = resolvedLeverage;
+          if (hasOwnField(params, "slippage")) createBody.slippage = params.slippage;
+          if (hasOwnField(params, "expiration")) createBody.expiration = params.expiration;
+
+          const createSignature = Signer.getSignature(
+            createBody,
+            privateKey,
+            {
+              trader_id: "number",
+              eth_address: "string",
+              symbol: "string",
+              chain_id: "number",
+              signed_at: "number",
+            } as const,
+          );
+          const createOk = await settleStep(
+            "create",
+            `${settlementEngineUrl}/traders`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-public-key": publicKey,
+                "x-signature": createSignature,
+              },
+              body: JSON.stringify(createBody),
+            },
+          );
+
+          if (createOk && (hasOwnField(params, "positionQty") || hasOwnField(params, "isActive"))) {
+            const followUpBody: Record<string, unknown> = {
+              trader_id: params.agentId,
+              signed_at: signedAt,
+            };
+            if (hasOwnField(params, "positionQty")) followUpBody.position_qty = params.positionQty;
+            if (hasOwnField(params, "isActive")) followUpBody.is_active = params.isActive;
+            const followUpSignature = Signer.getSignature(
+              followUpBody,
+              privateKey,
+              {
+                trader_id: "number",
+                signed_at: "number",
+              } as const,
+            );
+            await settleStep(
+              "patch_after_create",
+              `${settlementEngineUrl}/traders/${params.agentId}`,
+              {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-public-key": publicKey,
+                  "x-signature": followUpSignature,
+                },
+                body: JSON.stringify(followUpBody),
+              },
+            );
+          }
+        } else if (settlementPatchNeeded) {
+          const patchBody: Record<string, unknown> = {
+            trader_id: params.agentId,
+            signed_at: signedAt,
+          };
+          if (agentAddressChanged) patchBody.agent_address = resolvedWalletAddress;
+          if (hasOwnField(params, "symbol")) patchBody.symbol = params.symbol;
+          if (hasOwnField(params, "chainId")) patchBody.chain_id = params.chainId;
+          if (hasOwnField(params, "protocol")) patchBody.protocol = params.protocol;
+          if (hasOwnField(params, "buyLimit")) patchBody.buy_limit_usd = params.buyLimit;
+          if (hasOwnField(params, "positionQty")) patchBody.position_qty = params.positionQty;
+          if (hasOwnField(params, "slippage")) patchBody.slippage = params.slippage;
+          if (hasOwnField(params, "expiration")) patchBody.expiration = params.expiration;
+          if (hasOwnField(params, "leverage")) patchBody.leverage = params.leverage;
+          if (hasOwnField(params, "isActive")) patchBody.is_active = params.isActive;
+
+          const patchSignature = Signer.getSignature(
+            patchBody,
+            privateKey,
+            {
+              trader_id: "number",
+              signed_at: "number",
+            } as const,
+          );
+          await settleStep(
+            "patch",
+            `${settlementEngineUrl}/traders/${params.agentId}`,
+            {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                "x-public-key": publicKey,
+                "x-signature": patchSignature,
+              },
+              body: JSON.stringify(patchBody),
+            },
+          );
+        }
+
+        result.settlement = settlementResult;
+      }
+
+      try {
+        const [verifySettings, verifyAgent] = await Promise.all([
+          fetchAgentSettingsForUpdate(auth, params.agentId),
+          fetch(`${baseUrl}/api/agent/${params.agentId}`).then(async (res) => await parseResponseBody(res)),
+        ]);
+        result.verify = {
+          ok: true,
+          settings: verifySettings,
+          agent: verifyAgent,
+        };
+      } catch (e: any) {
+        result.verify = {
+          ok: false,
+          error: e.message,
+        };
+      }
+
+      result.warnings = Array.from(new Set(warnings));
+      debugLog("update_agent", "result", result);
+      return textResult(result);
     },
   });
 
