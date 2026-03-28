@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveBillingStageParams, type BillingEnvironment } from "./billing-stage.js";
+import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "./update-agent-billing.js";
 import { SUPPORTED_PAIRS } from "./supported-pairs.js";
 
 // ── Strategy schema ────────────────────────────────────────────────
@@ -2243,18 +2244,54 @@ export default function (api: any) {
       if (mainUpdateRequested) {
         const tradingDataResult: Record<string, unknown> = {};
         let billingHeaders: Record<string, string> = {};
+        let billingRequirement: UpdateAgentBillingRequirement = "unknown";
+        let billingError: string | null = null;
+
         try {
-          const billingWallet = buildBillingWallet();
-          tradingDataResult.billingWalletRegistration = await ensureBillingWalletRegistered({
-            npub,
-            publicKey,
-            privateKey,
-            wallet: billingWallet,
-          });
-          billingHeaders = await buildBillingHeaders(billingWallet);
+          const billingBypassed = await fetchBillingBypassStatus(npub);
+          billingRequirement = billingBypassed ? "bypassed" : "required";
         } catch (e: any) {
-          tradingDataResult.billingWarning = e.message;
-          warnings.push(`Billing wallet registration failed before trading-data update: ${e.message}`);
+          billingError = `billing bypass check failed: ${e.message}`;
+          tradingDataResult.billingBypassWarning = billingError;
+          warnings.push(`Could not confirm billing bypass status before trading-data update: ${e.message}`);
+        }
+
+        if (billingRequirement !== "bypassed") {
+          try {
+            const billingWallet = buildBillingWallet();
+            tradingDataResult.billingWalletRegistration = await ensureBillingWalletRegistered({
+              npub,
+              publicKey,
+              privateKey,
+              wallet: billingWallet,
+            });
+            billingHeaders = await buildBillingHeaders(billingWallet);
+          } catch (e: any) {
+            billingError = e.message;
+            tradingDataResult.billingWarning = e.message;
+            warnings.push(`Billing wallet registration failed before trading-data update: ${e.message}`);
+          }
+        }
+
+        const billingDecision = decideUpdateAgentBilling({
+          requirement: billingRequirement,
+          billingHeaders,
+          billingError,
+        });
+        if (!billingDecision.canProceed) {
+          result.error = billingDecision.error;
+          result.tradingData = {
+            ...tradingDataResult,
+            ok: false,
+            blocked: true,
+            requirement: billingDecision.requirement,
+            requiresBillingHeaders: billingDecision.requiresBillingHeaders,
+            hasBillingHeaders: billingDecision.hasBillingHeaders,
+            error: billingDecision.error,
+          };
+          result.warnings = Array.from(new Set(warnings));
+          debugLog("update_agent", "result", result);
+          return textResult(result);
         }
 
         const logSignature = Signer.getSignature(
