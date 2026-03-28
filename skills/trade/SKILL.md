@@ -1,11 +1,13 @@
 ---
 name: trade
-description: Create a paper or live trading agent. Use when the user wants to start trading, deploy a trading agent, set up paper trading, or trade on Hyperliquid.
+description: Create a new paper or live trading agent. Use when the user wants to start trading, deploy a new trading agent, set up paper trading, or trade on Hyperliquid. Do not use this skill to copy an existing agent.
 ---
 
 # Trading Agent Creation
 
 Follow these steps to create a paper or live trading agent.
+
+If the user wants to copy, follow, or duplicate an existing agent, use the `copy-trade` skill instead of this one.
 
 ## Step 1 — Ask trading mode and resolve market/network
 Ask the user: **paper** or **live** mode?

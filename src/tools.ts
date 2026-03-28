@@ -39,6 +39,11 @@ const OrderConfig = Type.Object({
   size: Type.Optional(SizeConfig),
 });
 
+const CopyTradeOrderConfig = Type.Object({
+  type: Type.String({ description: '"market"' }),
+  size: SizeConfig,
+});
+
 const PyramidingConfig = Type.Object({
   enabled: Type.Boolean(),
   max_legs: Type.Number(),
@@ -132,6 +137,7 @@ const DEFAULT_FALLBACK_SWAP_GAS = 250_000n;
 const DEFAULT_FALLBACK_APPROVE_GAS = 70_000n;
 const DEFAULT_FALLBACK_NFT_STAKE_GAS = 300_000n;
 const DEFAULT_FALLBACK_VAULT_DEPOSIT_GAS = 220_000n;
+const DEFAULT_LIVE_LEVERAGE = 3;
 
 const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
@@ -865,6 +871,30 @@ async function fetchUsdcBalance(masterWalletAddress: string, chainId: number): P
   return balance;
 }
 
+async function deriveDefaultLiveBuyLimit(
+  masterWalletAddress: string,
+  chainId: number,
+  leverage = DEFAULT_LIVE_LEVERAGE,
+): Promise<{ initialCapital: number; leverage: number; buyLimit: number } | null> {
+  if (chainId !== 998 && chainId !== 999) {
+    return null;
+  }
+  const initialCapital = await fetchUsdcBalance(masterWalletAddress, chainId);
+  if (initialCapital === 0) {
+    const appUrl = chainId === 999
+      ? "https://app.hyperliquid.xyz"
+      : "https://app.hyperliquid-testnet.xyz";
+    throw new Error(
+      `Wallet ${masterWalletAddress} has 0 USDC balance. Deposit USDC before deploying: ${appUrl}`,
+    );
+  }
+  return {
+    initialCapital,
+    leverage,
+    buyLimit: initialCapital * leverage,
+  };
+}
+
 export default function (api: any) {
   const pluginConfig = api.config?.plugins?.entries?.["trading-plugin"]?.config ?? api.config ?? {};
   const baseUrl: string = pluginConfig.baseUrl ?? DEFAULT_BASE_URL;
@@ -1044,6 +1074,88 @@ export default function (api: any) {
     }
     const data = extractApiData<any[]>(body);
     return Array.isArray(data) ? data : [];
+  }
+
+  function buildAgentActionSignature(
+    privateKey: string,
+    publicKey: string,
+    agentId: number,
+    action: string,
+    timestamp: number,
+  ): string {
+    return Signer.getSignature(
+      {
+        agent_id: agentId,
+        action,
+        user: Nip19.npubEncode(publicKey),
+        timestamp,
+      },
+      privateKey,
+      {
+        agent_id: "number",
+        action: "string",
+        user: "string",
+        timestamp: "number",
+      } as const,
+    );
+  }
+
+  function buildWalletActionSignature(
+    privateKey: string,
+    publicKey: string,
+    walletAddress: string,
+    action: string,
+    createdAt: number,
+    agentId?: number,
+  ): string {
+    const payload: Record<string, unknown> = {
+      created_at: createdAt,
+      wallet_address: walletAddress,
+      action,
+      npub: Nip19.npubEncode(publicKey),
+    };
+    const schema: Record<string, "string" | "number"> = {
+      created_at: "number",
+      wallet_address: "string",
+      action: "string",
+      npub: "string",
+    };
+    if (agentId != null) {
+      payload.agent_id = agentId;
+      schema.agent_id = "number";
+    }
+    return Signer.getSignature(payload, privateKey, schema);
+  }
+
+  async function fetchPublicAgentProfile(agentId: number): Promise<any> {
+    const res = await fetch(`${baseUrl}/api/agent/${agentId}`);
+    const body = await parseResponseBody(res);
+    if (!res.ok) {
+      throw new Error(`get_agent failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+    return extractApiData(body);
+  }
+
+  async function fetchSettlementProtocolName(
+    marketType: "spot" | "perp",
+    chainId: number,
+  ): Promise<string | undefined> {
+    const res = await fetch(`${settlementEngineUrl}/instruments/${marketType}`);
+    const body = await parseResponseBody(res);
+    if (!res.ok) {
+      throw new Error(`settlement instruments failed: ${res.status} ${responseErrorMessage(body)}`);
+    }
+
+    const instruments = Array.isArray(body?.instruments)
+      ? body.instruments
+      : Array.isArray(body?.data?.instruments)
+        ? body.data.instruments
+        : [];
+    const match = instruments.find((instrument: any) => Number(instrument?.chain_id) === chainId);
+    const protocolName = match?.protocol_name;
+    return typeof protocolName === "string" && protocolName.trim()
+      ? protocolName.trim()
+      : undefined;
   }
 
   function buildBillingWallet(): Wallet {
@@ -1241,14 +1353,15 @@ export default function (api: any) {
     return parsed;
   }
 
-  async function fetchBillingFeeQuote(): Promise<{
+  async function fetchBillingFeeQuote(agentId?: number): Promise<{
     periodSeconds: number;
     operatingFeeRaw: bigint;
     protocolFeeRaw: bigint;
     strategyFeeRaw: bigint;
     tokenSymbol: string;
   }> {
-    const url = `${baseUrl}/api/billing-fee`;
+    const query = agentId != null ? `?agentId=${encodeURIComponent(String(agentId))}` : "";
+    const url = `${baseUrl}/api/billing-fee${query}`;
     debugLog("billing", "api.req /api/billing-fee", { url });
     const res = await fetch(url);
     const body = await res.json().catch(async () => await res.text().catch(() => null));
@@ -1327,6 +1440,7 @@ export default function (api: any) {
     mode?: string;
     marketType?: string;
     symbol?: string;
+    agentId?: number;
     npub: string;
     publicKey: string;
     privateKey: string;
@@ -1427,7 +1541,7 @@ export default function (api: any) {
     const vaultWrite = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, billingWallet) as any;
     const routerWrite = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, billingWallet) as any;
     const [feeQuote, billingBalance, rawOswapBalance, rawBnbBalance, rawNftBalances, rawNftAllowance, rawVaultAllowance, feeData] = await Promise.all([
-      fetchBillingFeeQuote(),
+      fetchBillingFeeQuote(input.agentId),
       fetchBillingBalanceSnapshot(billingWallet),
       tokenRead.balanceOf(billingWallet.address),
       provider.getBalance(billingWallet.address),
@@ -2960,6 +3074,240 @@ export default function (api: any) {
   });
 
   api.registerTool({
+    name: "prepare_copy_agent",
+    description: "Validate prerequisites and infer defaults for creating a live copy-trading agent from an existing source agent. Mirrors the normal live-agent creation preflight, including any required billing setup before calling /api/copy-agent.",
+    parameters: Type.Object({
+      sourceAgentId: Type.Number({ description: "Existing source agent ID to copy" }),
+      alias: Type.Optional(Type.String({ description: "Optional display name for the copied agent" })),
+      walletId: Type.Optional(Type.Number({ description: "Optional wallet ID to preview against the source agent chain" })),
+      walletAddress: Type.Optional(Type.String({ description: "Optional wallet address override used together with walletId preview" })),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        sourceAgentId: number;
+        alias?: string;
+        walletId?: number;
+        walletAddress?: string;
+      },
+    ) {
+      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const alias = typeof params.alias === "string" && params.alias.trim() ? params.alias.trim() : undefined;
+
+      const result: Record<string, unknown> = {
+        copy: {
+          sourceAgentId: params.sourceAgentId,
+          alias: alias ?? null,
+          liveOnly: true,
+        },
+      };
+
+      let sourceAgent: any;
+      try {
+        sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId);
+      } catch (e: any) {
+        return textResult({ ...result, error: e.message });
+      }
+
+      const sourceName = typeof sourceAgent?.name === "string" && sourceAgent.name.trim()
+        ? sourceAgent.name.trim()
+        : `Agent ${params.sourceAgentId}`;
+      const sourceSymbol = typeof sourceAgent?.pair === "string" && sourceAgent.pair.trim()
+        ? sourceAgent.pair.trim()
+        : typeof sourceAgent?.symbol === "string" && sourceAgent.symbol.trim()
+          ? sourceAgent.symbol.trim()
+          : undefined;
+      const sourceMarketType: "spot" | "perp" = sourceAgent?.marketType === "perp" ? "perp" : "spot";
+      const sourceChainIdValue = sourceAgent?.chain_id ?? sourceAgent?.chainId;
+      const sourceChainId = sourceChainIdValue == null || Number.isNaN(Number(sourceChainIdValue))
+        ? null
+        : Number(sourceChainIdValue);
+      const sourceBuyLimitValue = sourceAgent?.buy_limit ?? sourceAgent?.buyLimit ?? null;
+      const sourceBuyLimit = sourceBuyLimitValue == null || Number.isNaN(Number(sourceBuyLimitValue))
+        ? null
+        : Number(sourceBuyLimitValue);
+
+      result.sourceAgent = {
+        id: params.sourceAgentId,
+        name: sourceName,
+        owner: sourceAgent?.owner ?? null,
+        mode: sourceAgent?.mode ?? null,
+        pair: sourceSymbol ?? null,
+        marketType: sourceMarketType,
+        chainId: sourceChainId,
+        currentValueUsd: sourceAgent?.current_value_usd ?? null,
+        initialCapital: sourceAgent?.initialCapital ?? sourceAgent?.initial_capital ?? null,
+        copiedFrom: sourceAgent?.copied_from ?? null,
+      };
+
+      if (!sourceSymbol) {
+        return textResult({
+          ...result,
+          error: `Source agent ${params.sourceAgentId} is missing a trading pair; cannot prepare copy deployment`,
+        });
+      }
+
+      let preparedContext: PreparedAgentCreationContext;
+      try {
+        preparedContext = await prepareAgentCreationContext({
+          name: alias ?? sourceName,
+          mode: "live",
+          marketType: sourceMarketType,
+          symbol: sourceSymbol,
+          agentId: params.sourceAgentId,
+          npub,
+          publicKey,
+          privateKey,
+        });
+      } catch (e: any) {
+        return textResult({
+          ...result,
+          error: `Could not prepare copy-trade billing preflight: ${e.message}`,
+        });
+      }
+
+      let inferredProtocol: string | undefined;
+      let walletPreview: Record<string, unknown> | undefined;
+      let walletWarning: string | undefined;
+      let resolvedPreviewChainId = sourceChainId;
+      let walletDerivedBuyLimit: { initialCapital: number; leverage: number; buyLimit: number } | null = null;
+      if (sourceChainId != null) {
+        try {
+          inferredProtocol = await fetchSettlementProtocolName(sourceMarketType, sourceChainId);
+        } catch (e: any) {
+          walletWarning = `Could not infer settlement protocol from instruments: ${e.message}`;
+        }
+      }
+
+      if (params.walletId != null || params.walletAddress) {
+        try {
+          const wallets = await fetchWalletsForUpdate(auth);
+          const walletRecord = resolveWalletRecord(wallets, {
+            walletId: params.walletId ?? null,
+            walletAddress: params.walletAddress ?? null,
+          });
+          if (!walletRecord) {
+            return textResult({
+              ...result,
+              error: `Wallet preview failed: no wallet matched walletId=${params.walletId ?? "null"} walletAddress=${params.walletAddress ?? "null"}`,
+            });
+          }
+
+          const resolvedWalletAddress = typeof walletRecord.wallet_address === "string"
+            ? walletRecord.wallet_address
+            : params.walletAddress;
+          const resolvedMasterWalletAddress = typeof walletRecord.master_wallet_address === "string" && walletRecord.master_wallet_address.trim()
+            ? walletRecord.master_wallet_address
+            : resolvedWalletAddress;
+
+          if (resolvedPreviewChainId == null) {
+            if (walletRecord.hyperliquid_network === "mainnet") {
+              resolvedPreviewChainId = 999;
+            } else if (walletRecord.hyperliquid_network === "testnet") {
+              resolvedPreviewChainId = 998;
+            }
+          }
+
+          if (resolvedPreviewChainId != null && Array.isArray(walletRecord.authorized_agents)) {
+            const conflictingAgent = walletRecord.authorized_agents.find((agent: any) => Number(agent?.chainId) === resolvedPreviewChainId);
+            if (conflictingAgent) {
+              return textResult({
+                ...result,
+                error: `Wallet preview failed: wallet ${resolvedWalletAddress ?? walletRecord.id} is already authorized for agent ${conflictingAgent.id} on chain ${resolvedPreviewChainId}`,
+              });
+            }
+          }
+
+          walletPreview = {
+            walletId: Number(walletRecord.id),
+            walletAddress: resolvedWalletAddress ?? null,
+            masterWalletAddress: resolvedMasterWalletAddress ?? null,
+            walletType: walletRecord.wallet_type ?? null,
+            network: walletRecord.hyperliquid_network ?? null,
+          };
+
+          if (!inferredProtocol) {
+            inferredProtocol = inferLiveProtocol({
+              marketType: sourceMarketType,
+              chainId: resolvedPreviewChainId ?? undefined,
+              walletNetwork: walletRecord.hyperliquid_network ?? null,
+            });
+          }
+
+          if (resolvedMasterWalletAddress && resolvedPreviewChainId != null) {
+            try {
+              walletDerivedBuyLimit = await deriveDefaultLiveBuyLimit(
+                resolvedMasterWalletAddress,
+                resolvedPreviewChainId,
+              );
+            } catch (e: any) {
+              return textResult({
+                ...result,
+                error: `Wallet preview failed: ${e.message}`,
+              });
+            }
+          }
+        } catch (e: any) {
+          return textResult({
+            ...result,
+            error: `Wallet preview failed: ${e.message}`,
+          });
+        }
+      }
+
+      if (walletPreview) {
+        result.wallet = walletPreview;
+      }
+      if (walletWarning) {
+        result.warning = walletWarning;
+      }
+
+      result.billing = preparedContext.prepared.billing;
+      result.billingWallet = preparedContext.prepared.wallet;
+      result.nft = preparedContext.prepared.nft;
+      result.fees = preparedContext.prepared.fees;
+      if (preparedContext.prepared.gas) {
+        result.gas = preparedContext.prepared.gas;
+      }
+
+      result.defaults = {
+        alias: alias ?? sourceName,
+        symbol: sourceSymbol,
+        marketType: sourceMarketType,
+        chainId: resolvedPreviewChainId,
+        leverage: walletDerivedBuyLimit?.leverage ?? DEFAULT_LIVE_LEVERAGE,
+        initialCapital: walletDerivedBuyLimit?.initialCapital ?? null,
+        buyLimit: walletDerivedBuyLimit?.buyLimit ?? (walletPreview ? sourceBuyLimit : null),
+        buyLimitSource: walletDerivedBuyLimit
+          ? "selected_wallet_balance_x_leverage"
+          : walletPreview
+            ? "source_agent"
+            : "selected_wallet_balance_x_leverage_on_confirm",
+        protocol: inferredProtocol ?? null,
+      };
+      result.chainContext = {
+        requiresUserSelection: resolvedPreviewChainId == null,
+        reason: sourceAgent?.mode === "paper" ? "source_agent_is_paper" : "source_agent_missing_chain_id",
+        suggestedNetworks: ["testnet", "mainnet"],
+      };
+      result.executionPlan = {
+        billingActions: preparedContext.prepared.executionPlan.actions,
+        approvals: preparedContext.prepared.executionPlan.approvals,
+        depositToVault: preparedContext.prepared.executionPlan.depositToVault,
+        actions: [
+          "Create the copied live agent via POST /api/copy-agent.",
+          "Sync the copied agent to trading-bot via POST /api/notify-agent-creation.",
+          "Authorize the selected wallet via POST /api/wallets/authorize.",
+          "Register the copied agent on the settlement engine via POST /traders.",
+        ],
+      };
+
+      return textResult(result);
+    },
+  });
+
+  api.registerTool({
     name: "deploy_agent",
     description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Replaces sequential calls to create_agent + notify_trading_bot + register_trader + log_agent_action + get_agent.",
     parameters: Type.Object({
@@ -3047,7 +3395,7 @@ export default function (api: any) {
       }
 
       // Default leverage to 3x for live mode
-      const leverage = isLive ? (params.leverage ?? 3) : params.leverage;
+      const leverage = isLive ? (params.leverage ?? DEFAULT_LIVE_LEVERAGE) : params.leverage;
 
       // Auto-compute buyLimit and settlement_config for live
       const buyLimit = isLive && leverage ? initialCapital * leverage : undefined;
@@ -3453,6 +3801,689 @@ export default function (api: any) {
       }
 
       debugLog("deploy_agent", "result", result);
+      return textResult(result);
+    },
+  });
+
+  api.registerTool({
+    name: "deploy_copy_agent",
+    description: "Create a live copy-trading agent from an existing source agent. Executes the current UI/backend flow: copy-agent, notify-agent-creation, wallet authorization, settlement registration, and verification.",
+    parameters: Type.Object({
+      sourceAgentId: Type.Number({ description: "Existing source agent ID to copy" }),
+      alias: Type.Optional(Type.String({ description: "Optional display name for the copied agent. Defaults to the source agent name." })),
+      walletId: Type.Number({ description: "Wallet ID to assign to the copied live agent" }),
+      walletAddress: Type.Optional(Type.String({ description: "Optional wallet address override. Usually resolved from walletId." })),
+      masterWalletAddress: Type.Optional(Type.String({ description: "Optional settlement master wallet address override. Defaults to wallet.master_wallet_address or walletAddress." })),
+      buyLimit: Type.Optional(Type.Number({ description: "Optional max buy amount in USD per copied trade. Defaults to selected wallet USDC balance multiplied by the default live leverage." })),
+      order: Type.Optional(CopyTradeOrderConfig),
+      protocol: Type.Optional(Type.String({ description: "Optional settlement protocol override. If omitted, inferred from settlement instruments or the wallet network." })),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        sourceAgentId: number;
+        alias?: string;
+        walletId: number;
+        walletAddress?: string;
+        masterWalletAddress?: string;
+        buyLimit?: number;
+        order?: {
+          type: string;
+          size: {
+            mode: string;
+            value?: number;
+          };
+        };
+        protocol?: string;
+      },
+    ) {
+      const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const alias = typeof params.alias === "string" && params.alias.trim() ? params.alias.trim() : undefined;
+      debugLog("deploy_copy_agent", "entry", {
+        ...params,
+        alias: alias ?? null,
+        usesNostrPrivateKey: true,
+      });
+
+      const result: Record<string, unknown> = {
+        copy: {
+          sourceAgentId: params.sourceAgentId,
+          alias: alias ?? null,
+          liveOnly: true,
+        },
+        warnings: [] as string[],
+      };
+      const warnings = result.warnings as string[];
+      let preparedContext: PreparedAgentCreationContext;
+      let billingHeaders: EthHeaders | undefined;
+      let billingWallet: Wallet | undefined;
+      let billingTransactions: Record<string, any> | undefined;
+
+      let sourceAgent: any;
+      try {
+        sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId);
+      } catch (e: any) {
+        result.error = e.message;
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+
+      const sourceName = typeof sourceAgent?.name === "string" && sourceAgent.name.trim()
+        ? sourceAgent.name.trim()
+        : `Agent ${params.sourceAgentId}`;
+      const sourceSymbol = typeof sourceAgent?.pair === "string" && sourceAgent.pair.trim()
+        ? sourceAgent.pair.trim()
+        : typeof sourceAgent?.symbol === "string" && sourceAgent.symbol.trim()
+          ? sourceAgent.symbol.trim()
+          : undefined;
+      if (!sourceSymbol) {
+        result.error = `Source agent ${params.sourceAgentId} is missing a trading pair; cannot deploy copy agent`;
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+
+      const sourceMarketType: "spot" | "perp" = sourceAgent?.marketType === "perp" ? "perp" : "spot";
+      const sourceChainIdValue = sourceAgent?.chain_id ?? sourceAgent?.chainId;
+      const sourceChainId = sourceChainIdValue == null || Number.isNaN(Number(sourceChainIdValue))
+        ? null
+        : Number(sourceChainIdValue);
+      result.sourceAgent = {
+        id: params.sourceAgentId,
+        name: sourceName,
+        owner: sourceAgent?.owner ?? null,
+        pair: sourceSymbol,
+        marketType: sourceMarketType,
+        chainId: sourceChainId,
+        buyLimit: sourceAgent?.buy_limit ?? sourceAgent?.buyLimit ?? null,
+        currentValueUsd: sourceAgent?.current_value_usd ?? null,
+        copiedFrom: sourceAgent?.copied_from ?? null,
+      };
+
+      try {
+        preparedContext = await prepareAgentCreationContext({
+          name: alias ?? sourceName,
+          mode: "live",
+          marketType: sourceMarketType,
+          symbol: sourceSymbol,
+          agentId: params.sourceAgentId,
+          npub,
+          publicKey,
+          privateKey,
+        });
+      } catch (e: any) {
+        result.error = `Could not prepare copy-trade billing preflight: ${e.message}`;
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+
+      let wallets: any[];
+      try {
+        wallets = await fetchWalletsForUpdate(auth);
+      } catch (e: any) {
+        result.error = `Failed to load wallets before copy deployment: ${e.message}`;
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+
+      const walletRecord = resolveWalletRecord(wallets, {
+        walletId: params.walletId,
+        walletAddress: params.walletAddress ?? null,
+      });
+      if (!walletRecord) {
+        result.error = `No wallet matched walletId=${params.walletId}${params.walletAddress ? ` walletAddress=${params.walletAddress}` : ""}`;
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+
+      const resolvedWalletId = Number(walletRecord.id);
+      const resolvedWalletAddress = typeof params.walletAddress === "string" && params.walletAddress.trim()
+        ? params.walletAddress.trim()
+        : typeof walletRecord.wallet_address === "string" && walletRecord.wallet_address.trim()
+          ? walletRecord.wallet_address.trim()
+          : undefined;
+      if (!resolvedWalletAddress) {
+        result.error = `Wallet ${resolvedWalletId} is missing wallet_address`;
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+
+      const resolvedMasterWalletAddress = typeof params.masterWalletAddress === "string" && params.masterWalletAddress.trim()
+        ? params.masterWalletAddress.trim()
+        : typeof walletRecord.master_wallet_address === "string" && walletRecord.master_wallet_address.trim()
+          ? walletRecord.master_wallet_address.trim()
+          : resolvedWalletAddress;
+      const walletNetwork = typeof walletRecord.hyperliquid_network === "string" && walletRecord.hyperliquid_network.trim()
+        ? walletRecord.hyperliquid_network.trim()
+        : null;
+
+      let resolvedChainId = sourceChainId;
+      if (resolvedChainId == null) {
+        if (walletNetwork === "mainnet") {
+          resolvedChainId = 999;
+        } else if (walletNetwork === "testnet") {
+          resolvedChainId = 998;
+        }
+      }
+      if (resolvedChainId == null) {
+        result.error = `Source agent ${params.sourceAgentId} is missing chainId; cannot register settlement trader`;
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+
+      if (Array.isArray(walletRecord.authorized_agents)) {
+        const conflictingAgent = walletRecord.authorized_agents.find((agent: any) => Number(agent?.chainId) === resolvedChainId);
+        if (conflictingAgent) {
+          result.error = `Wallet ${resolvedWalletAddress} is already authorized for agent ${conflictingAgent.id} on chain ${resolvedChainId}`;
+          debugLog("deploy_copy_agent", "result", result);
+          return textResult(result);
+        }
+      }
+
+      let resolvedProtocol = typeof params.protocol === "string" && params.protocol.trim()
+        ? params.protocol.trim()
+        : undefined;
+      if (!resolvedProtocol) {
+        try {
+          resolvedProtocol = await fetchSettlementProtocolName(sourceMarketType, resolvedChainId);
+        } catch (e: any) {
+          warnings.push(`Could not infer settlement protocol from instruments: ${e.message}`);
+        }
+      }
+      if (!resolvedProtocol) {
+        resolvedProtocol = inferLiveProtocol({
+          marketType: sourceMarketType,
+          chainId: resolvedChainId,
+          walletNetwork,
+        }) ?? (sourceMarketType === "perp" ? "hyperliquid" : undefined);
+      }
+
+      let derivedDefaultBuyLimit: { initialCapital: number; leverage: number; buyLimit: number } | null = null;
+      try {
+        derivedDefaultBuyLimit = await deriveDefaultLiveBuyLimit(
+          resolvedMasterWalletAddress,
+          resolvedChainId,
+        );
+      } catch (e: any) {
+        result.error = e.message;
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+
+      const resolvedBuyLimit = hasOwnField(params, "buyLimit")
+        ? Number(params.buyLimit)
+        : (derivedDefaultBuyLimit?.buyLimit ?? 0);
+      if (!Number.isFinite(resolvedBuyLimit) || resolvedBuyLimit < 0) {
+        result.error = "buyLimit must be a finite number greater than or equal to 0";
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+      if (resolvedBuyLimit === 0) {
+        warnings.push("buyLimit resolved to 0 USD. The copied agent may not place meaningful live trades until this is updated.");
+      }
+
+      const settlementConfigPayload: Record<string, unknown> = {
+        eth_address: resolvedMasterWalletAddress,
+        symbol: sourceSymbol,
+        chain_id: resolvedChainId,
+        buy_limit_usd: resolvedBuyLimit,
+      };
+      if (normalizeAddress(resolvedMasterWalletAddress) !== normalizeAddress(resolvedWalletAddress)) {
+        settlementConfigPayload.agent_address = resolvedWalletAddress;
+      }
+      if (resolvedProtocol) {
+        settlementConfigPayload.protocol = resolvedProtocol;
+      }
+      const settlementConfig = JSON.stringify(settlementConfigPayload);
+
+      result.wallet = {
+        walletId: resolvedWalletId,
+        walletAddress: resolvedWalletAddress,
+        masterWalletAddress: resolvedMasterWalletAddress,
+        walletType: walletRecord.wallet_type ?? null,
+        network: walletNetwork,
+      };
+      result.defaults = {
+        symbol: sourceSymbol,
+        marketType: sourceMarketType,
+        chainId: resolvedChainId,
+        leverage: derivedDefaultBuyLimit?.leverage ?? DEFAULT_LIVE_LEVERAGE,
+        initialCapital: derivedDefaultBuyLimit?.initialCapital ?? null,
+        buyLimit: resolvedBuyLimit,
+        buyLimitSource: hasOwnField(params, "buyLimit")
+          ? "user_override"
+          : "selected_wallet_balance_x_leverage",
+        protocol: resolvedProtocol ?? null,
+      };
+
+      const billingRequired = preparedContext.prepared.billing.required;
+      if (!billingRequired) {
+        result.billing = {
+          required: false,
+          bypassed: true,
+          reason: "billing_not_required",
+        };
+      } else {
+        const activeBillingWallet = preparedContext.billingWallet;
+        if (!activeBillingWallet) {
+          result.error = "Billing wallet could not be derived from nostrPrivateKey";
+          debugLog("deploy_copy_agent", "result", result);
+          return textResult(result);
+        }
+        billingWallet = activeBillingWallet;
+        billingTransactions = {
+          swap: { ok: preparedContext.oswapShortfallRaw === 0n, skipped: preparedContext.oswapShortfallRaw === 0n },
+          nftApproval: { ok: !preparedContext.nftApprovalRequired, skipped: !preparedContext.nftApprovalRequired },
+          nftMint: { ok: preparedContext.oswapForNftRaw === 0n, skipped: preparedContext.oswapForNftRaw === 0n },
+          vaultApproval: { ok: !preparedContext.vaultApprovalRequired, skipped: !preparedContext.vaultApprovalRequired },
+          vaultDeposit: { ok: preparedContext.oswapForInitialVaultCreditRaw === 0n, skipped: preparedContext.oswapForInitialVaultCreditRaw === 0n },
+        };
+        result.billing = {
+          required: true,
+          walletAddress: activeBillingWallet.address,
+          preflight: preparedContext.prepared,
+          transactions: billingTransactions,
+        };
+
+        if (preparedContext.bnbShortfallRaw > 0n) {
+          result.error = `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`;
+          debugLog("deploy_copy_agent", "result", result);
+          return textResult(result);
+        }
+
+        const swapPath = [billingEvmConfig.wethAddress, billingEvmConfig.tokenAddress];
+        const routerContract = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, activeBillingWallet) as any;
+        const tokenContract = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, activeBillingWallet) as any;
+        if (!preparedContext.selectedEligibleNft) {
+          result.error = "No active eligible NFT config available";
+          debugLog("deploy_copy_agent", "result", result);
+          return textResult(result);
+        }
+        const nftContract = new Contract(preparedContext.selectedEligibleNft.contractAddress, NFT_ABI, activeBillingWallet) as any;
+        const vaultContract = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, activeBillingWallet) as any;
+
+        const failBilling = (step: string, error: string) => {
+          if (billingTransactions) {
+            billingTransactions[step] = { ok: false, skipped: false, error };
+          }
+          result.error = error;
+          debugLog("deploy_copy_agent", "result", result);
+          return textResult(result);
+        };
+
+        if (preparedContext.oswapShortfallRaw > 0n) {
+          try {
+            const deadline = Math.floor(Date.now() / 1000) + 1_200;
+            const swapTx = await routerContract.swapETHForExactTokens(
+              preparedContext.oswapShortfallRaw,
+              swapPath,
+              activeBillingWallet.address,
+              deadline,
+              { value: preparedContext.bnbForSwapMaxRaw },
+            );
+            const receipt = await swapTx.wait();
+            billingTransactions!.swap = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              oswapAmount: formatAmount(preparedContext.oswapShortfallRaw, billingEvmConfig.tokenDecimals),
+              maxBnbAmount: formatAmount(preparedContext.bnbForSwapMaxRaw, 18, 8),
+            };
+          } catch (e: any) {
+            return failBilling("swap", `BNB to ${billingEvmConfig.tokenSymbol} swap failed: ${e.message}`);
+          }
+        }
+
+        if (preparedContext.nftApprovalRequired) {
+          try {
+            const approveTx = await tokenContract.approve(
+              preparedContext.selectedEligibleNft.contractAddress,
+              preparedContext.oswapForNftRaw,
+            );
+            const receipt = await approveTx.wait();
+            billingTransactions!.nftApproval = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
+            };
+          } catch (e: any) {
+            return failBilling("nftApproval", `NFT approval failed: ${e.message}`);
+          }
+        }
+
+        if (preparedContext.oswapForNftRaw > 0n) {
+          try {
+            const mintTx = await nftContract.stake(preparedContext.oswapForNftRaw);
+            const receipt = await mintTx.wait();
+            billingTransactions!.nftMint = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
+            };
+          } catch (e: any) {
+            return failBilling("nftMint", `NFT mint failed: ${e.message}`);
+          }
+        }
+
+        if (preparedContext.vaultApprovalRequired) {
+          try {
+            const approveTx = await tokenContract.approve(
+              billingEvmConfig.vaultAddress,
+              preparedContext.oswapForInitialVaultCreditRaw,
+            );
+            const receipt = await approveTx.wait();
+            billingTransactions!.vaultApproval = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+            };
+          } catch (e: any) {
+            return failBilling("vaultApproval", `Vault approval failed: ${e.message}`);
+          }
+        }
+
+        if (preparedContext.oswapForInitialVaultCreditRaw > 0n) {
+          try {
+            const depositTx = await vaultContract.deposit(
+              activeBillingWallet.address,
+              preparedContext.oswapForInitialVaultCreditRaw,
+            );
+            const receipt = await depositTx.wait();
+            const indexedBalance = await waitForVaultCredit(
+              activeBillingWallet,
+              preparedContext.existingVaultCreditRaw + preparedContext.oswapForInitialVaultCreditRaw,
+            );
+            billingTransactions!.vaultDeposit = {
+              ok: true,
+              skipped: false,
+              txHash: receipt.hash,
+              amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+              indexedAvailableBalance: formatAmount(indexedBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
+            };
+          } catch (e: any) {
+            return failBilling("vaultDeposit", `Vault deposit failed: ${e.message}`);
+          }
+        }
+
+        billingHeaders = await buildBillingHeaders(activeBillingWallet);
+      }
+
+      let copiedAgentId: number;
+      let copiedAgentInitialCapital = Number(sourceAgent?.initialCapital ?? sourceAgent?.initial_capital ?? 0);
+      const effectiveName = alias ?? sourceName;
+
+      try {
+        const timestamp = Math.floor(Date.now() / 1000);
+        const signature = buildAgentActionSignature(
+          privateKey,
+          publicKey,
+          params.sourceAgentId,
+          "follow",
+          timestamp,
+        );
+        const copyBody: Record<string, unknown> = {
+          id: params.sourceAgentId,
+          walletId: resolvedWalletId,
+          buyLimit: resolvedBuyLimit,
+          signature,
+          timestamp,
+        };
+        if (alias) copyBody.alias = alias;
+        if (params.order) copyBody.order = params.order;
+
+        debugLog("deploy_copy_agent", "copy.api.req POST /api/copy-agent", copyBody);
+        const res = await fetch(`${baseUrl}/api/copy-agent`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: auth,
+            ...(billingHeaders ?? {}),
+          },
+          body: JSON.stringify(copyBody),
+        });
+        const body = await parseResponseBody(res);
+        debugLog("deploy_copy_agent", "copy.api.res POST /api/copy-agent", { status: res.status, body });
+
+        result.create = {
+          ok: res.ok && body?.success !== false,
+          status: res.status,
+          body,
+        };
+        if (!res.ok || body?.success === false) {
+          result.error = `copy_agent failed: ${res.status} ${responseErrorMessage(body)}`;
+          debugLog("deploy_copy_agent", "result", result);
+          return textResult(result);
+        }
+
+        copiedAgentId = Number(body?.agentId);
+        if (!Number.isFinite(copiedAgentId) || copiedAgentId <= 0) {
+          result.error = "copy_agent succeeded but did not return a valid agentId";
+          debugLog("deploy_copy_agent", "result", result);
+          return textResult(result);
+        }
+        if (body?.initialCapital != null && Number.isFinite(Number(body.initialCapital))) {
+          copiedAgentInitialCapital = Number(body.initialCapital);
+        }
+        (result.create as Record<string, unknown>).agentId = copiedAgentId;
+        (result.create as Record<string, unknown>).initialCapital = copiedAgentInitialCapital;
+      } catch (e: any) {
+        result.error = e.message;
+        debugLog("deploy_copy_agent", "result", result);
+        return textResult(result);
+      }
+
+      try {
+        const signedAt = Math.floor(Date.now() / 1000);
+        const notifySignature = Signer.getSignature(
+          {
+            id: copiedAgentId,
+            name: effectiveName,
+            initial_capital: copiedAgentInitialCapital,
+            signed_at: signedAt,
+          },
+          privateKey,
+          {
+            id: "number",
+            name: "string",
+            initial_capital: "number",
+            signed_at: "number",
+          } as const,
+        );
+        const notifyBody = {
+          agentId: copiedAgentId,
+          signed_at: signedAt,
+          settlement_config: settlementConfig,
+        };
+        debugLog("deploy_copy_agent", "notify.api.req POST /api/notify-agent-creation", notifyBody);
+        const res = await fetch(`${baseUrl}/api/notify-agent-creation`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: auth,
+            "x-public-key": publicKey,
+            "x-signature": notifySignature,
+          },
+          body: JSON.stringify(notifyBody),
+        });
+        const body = await parseResponseBody(res);
+        debugLog("deploy_copy_agent", "notify.api.res POST /api/notify-agent-creation", { status: res.status, body });
+        result.notify = {
+          ok: res.ok,
+          status: res.status,
+          body,
+        };
+        if (!res.ok) {
+          warnings.push(`Trading-bot notification failed after copy creation: ${responseErrorMessage(body)}`);
+        }
+      } catch (e: any) {
+        result.notify = { ok: false, error: e.message };
+        warnings.push(`Trading-bot notification failed after copy creation: ${e.message}`);
+      }
+
+      try {
+        const createdAt = Math.floor(Date.now() / 1000);
+        const walletSignature = buildWalletActionSignature(
+          privateKey,
+          publicKey,
+          resolvedWalletAddress,
+          "authorized",
+          createdAt,
+          copiedAgentId,
+        );
+        const authorizeBody = {
+          agentId: copiedAgentId,
+          npub,
+          walletId: resolvedWalletId,
+          signature: walletSignature,
+          createdAt,
+        };
+        debugLog("deploy_copy_agent", "wallet.api.req POST /api/wallets/authorize", authorizeBody);
+        const res = await fetch(`${baseUrl}/api/wallets/authorize`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: auth,
+          },
+          body: JSON.stringify(authorizeBody),
+        });
+        const body = await parseResponseBody(res);
+        debugLog("deploy_copy_agent", "wallet.api.res POST /api/wallets/authorize", { status: res.status, body });
+        result.authorizeWallet = {
+          ok: res.ok,
+          status: res.status,
+          body,
+        };
+        if (!res.ok) {
+          warnings.push(`Wallet authorization failed after copy creation: ${responseErrorMessage(body)}`);
+        }
+      } catch (e: any) {
+        result.authorizeWallet = { ok: false, error: e.message };
+        warnings.push(`Wallet authorization failed after copy creation: ${e.message}`);
+      }
+
+      try {
+        const signedAt = Math.floor(Date.now() / 1000);
+        const traderBody: Record<string, unknown> = {
+          trader_id: copiedAgentId,
+          owner: npub,
+          eth_address: resolvedMasterWalletAddress,
+          symbol: sourceSymbol,
+          chain_id: resolvedChainId,
+          market_type: sourceMarketType,
+          venue_type: sourceMarketType === "perp" ? "dex_orderbook" : "dex_amm",
+          buy_limit_usd: resolvedBuyLimit,
+          signed_at: signedAt,
+        };
+        if (normalizeAddress(resolvedMasterWalletAddress) !== normalizeAddress(resolvedWalletAddress)) {
+          traderBody.agent_address = resolvedWalletAddress;
+        }
+        if (resolvedProtocol) {
+          traderBody.protocol = resolvedProtocol;
+        }
+        const traderSignature = Signer.getSignature(
+          traderBody,
+          privateKey,
+          {
+            trader_id: "number",
+            eth_address: "string",
+            symbol: "string",
+            chain_id: "number",
+            signed_at: "number",
+          } as const,
+        );
+        debugLog("deploy_copy_agent", "trader.api.req POST /traders", traderBody);
+        const res = await fetch(`${settlementEngineUrl}/traders`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-public-key": publicKey,
+            "x-signature": traderSignature,
+          },
+          body: JSON.stringify(traderBody),
+        });
+        const body = await parseResponseBody(res);
+        debugLog("deploy_copy_agent", "trader.api.res POST /traders", { status: res.status, body });
+        result.registerTrader = {
+          ok: res.ok,
+          status: res.status,
+          body,
+        };
+        if (!res.ok) {
+          warnings.push(`Settlement registration failed after copy creation: ${responseErrorMessage(body)}`);
+        }
+      } catch (e: any) {
+        result.registerTrader = { ok: false, error: e.message };
+        warnings.push(`Settlement registration failed after copy creation: ${e.message}`);
+      }
+
+      try {
+        const [agentRes, settingsRes] = await Promise.all([
+          fetch(`${baseUrl}/api/agent/${copiedAgentId}`),
+          fetch(`${baseUrl}/api/agent/settings/${copiedAgentId}`, {
+            headers: { Authorization: auth },
+          }),
+        ]);
+        const [agentBody, settingsBody] = await Promise.all([
+          parseResponseBody(agentRes),
+          parseResponseBody(settingsRes),
+        ]);
+        debugLog("deploy_copy_agent", "verify.api.res", {
+          agentStatus: agentRes.status,
+          agentBody,
+          settingsStatus: settingsRes.status,
+          settingsBody,
+        });
+        result.verify = {
+          ok: agentRes.ok && settingsRes.ok,
+          agent: agentBody,
+          settings: settingsBody,
+        };
+        if (!agentRes.ok || !settingsRes.ok) {
+          warnings.push("Verification after copy deployment did not fully succeed.");
+        }
+      } catch (e: any) {
+        result.verify = { ok: false, error: e.message };
+        warnings.push(`Verification after copy deployment failed: ${e.message}`);
+      }
+
+      if (billingRequired && billingWallet) {
+        try {
+          const [postBalance, subscriptions] = await Promise.all([
+            fetchBillingBalanceSnapshot(billingWallet),
+            fetchBillingSubscriptions(billingWallet),
+          ]);
+          const matchedSubscription = subscriptions.find((subscription: any) => Number(subscription.agent_id) === copiedAgentId);
+          (result.billing as any).result = {
+            nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
+            vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+            updatedVaultCredit: formatAmount(postBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
+            pendingWithdrawalCredit: formatAmount(postBalance.pendingWithdrawalBalanceRaw, billingEvmConfig.tokenDecimals),
+            feeBreakdown: preparedContext.prepared.fees,
+            agentId: copiedAgentId,
+            agentName: effectiveName,
+            creationTimestamp: new Date().toISOString(),
+            nextBillingDateEstimate: matchedSubscription?.next_renewal_at
+              ?? new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
+          };
+        } catch (e: any) {
+          (result.billing as any).result = {
+            nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
+            vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+            feeBreakdown: preparedContext.prepared.fees,
+            agentId: copiedAgentId,
+            agentName: effectiveName,
+            creationTimestamp: new Date().toISOString(),
+            nextBillingDateEstimate: new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
+            warning: e.message,
+          };
+        }
+      }
+
+      result.warnings = Array.from(new Set(warnings));
+      debugLog("deploy_copy_agent", "result", result);
       return textResult(result);
     },
   });
