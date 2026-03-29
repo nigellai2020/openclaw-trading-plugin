@@ -1,18 +1,21 @@
 import { Type } from "@sinclair/typebox";
 
 const IndicatorConfig = Type.Object({
-  type: Type.String({ description: 'Indicator type: "rsi","sma","ema","macd","stochrsi","stochastic","bollinger","atr","renko","renko_atr","ohlc". Outputs — single-value (rsi,sma,ema,atr): {name}. macd: {name}.macd, {name}.signal, {name}.histogram. stochrsi/stochastic: {name}.k, {name}.d. bollinger: {name}.upper, {name}.middle, {name}.lower. renko/renko_atr: {name}.brick_high, {name}.brick_low, {name}.direction. ohlc: {name}.open, {name}.high, {name}.low, {name}.close, {name}.volume. Use "price" for live tick price (no indicator needed).' }),
+  type: Type.String({ description: 'Indicator type: "rsi","sma","ema","macd","stochrsi","stochastic" (alias "stoch"), "bollinger","atr","renko","renko_atr" (alias "renkoatr"), or "ohlc". Outputs — single-value (rsi,sma,ema,atr): {name}. macd: {name}.macd, {name}.signal, {name}.histogram. stochrsi/stochastic: {name}.k, {name}.d. bollinger: {name}.upper, {name}.middle, {name}.lower. renko/renko_atr: {name}.brick_high, {name}.brick_low, {name}.direction. ohlc: {name}.open, {name}.high, {name}.low, {name}.close, {name}.volume. In rules, use "price" (preferred) or "current_price" for live tick price; no indicator definition is needed.' }),
   name: Type.String({ description: 'Unique name referenced in rules, e.g. "ema_20_M15"' }),
   period: Type.Optional(Type.Number({ description: "Period/length (required for most)" })),
   timeframe: Type.Optional(Type.String({ description: '"M1","M5","M15","M30","H1","H4","D1"' })),
   params: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
-    description: 'Extra params. EMA/SMA/RSI: {period}. MACD: {fast_period,slow_period,signal_period}. Bollinger: {period,std_dev}. StochRSI: {rsi_period,stoch_period,k_period,d_period}. ATR: {period,multiplier}. Renko: {brick_size}. RenkoATR: {atr_period,atr_multiplier}.',
+    description: 'Preferred place for indicator-specific settings. EMA/SMA/RSI: {period}. MACD: {fast_period,slow_period,signal_period}. Bollinger: {period,std_dev}. StochRSI: {rsi_period,stoch_period,k_period,d_period}. Stochastic/stoch: {k_period,d_period,smooth_k}. ATR: {period,multiplier}. Renko: {brick_size}. RenkoATR/renkoatr: {atr_period,atr_multiplier}.',
   })),
 });
 
 const SizeConfig = Type.Object({
-  mode: Type.String({ description: '"all","fixed_usd","percent","shares","fixed_asset"' }),
-  value: Type.Optional(Type.Number()),
+  mode: Type.String({ description: 'Canonical modes: "all","notional_quote","percent","notional_base". Deprecated aliases still accepted: "fixed_usd" for "notional_quote", and "shares" or "fixed_asset" for "notional_base".' }),
+  value: Type.Optional(Type.Number({ description: "Fallback fixed size value. Keep this even when using an expression." })),
+  expression: Type.Optional(Type.Unknown({
+    description: 'Optional sizing expression AST, e.g. {"operator":"div","operands":[{"number":1000},{"indicator":"atr14"}]}. Prefer keeping value as a safe fallback.',
+  })),
 });
 
 const OrderConfig = Type.Object({
@@ -35,7 +38,7 @@ const RuleConfig = Type.Object({
   id: Type.String({ description: "Unique rule ID" }),
   intent: Type.String({ description: '"open" or "close"' }),
   when: Type.Unknown({
-    description: 'Condition. Simple: {"indicator":"rsi14","op":"lt","value":30}. Cross: {"indicator":"ema20","op":"crosses_above","other":"ema50"}. AND: {"all":[...]}. OR: {"any":[...]}. Profit: {"profit":{"mode":"percent","value":5}}. Age: {"position_age_secs":300}. Ops: lt,le,gt,ge,eq,ne,crosses_above,crosses_below.',
+    description: 'Condition object. Supported shapes include simple comparisons {"indicator":"rsi14","op":"lt","value":30}, indicator-to-indicator or cross checks {"indicator":"ema20","op":"crosses_above","other":"ema50"}, compounds {"all":[...]} and {"any":[...]}, profit checks {"profit":{"mode":"percent","value":5,"op":"ge"}} or {"profit":{"mode":"absolute","value":100,"currency":"quote"}}, position age {"position_age_secs":300}, and expression comparisons {"left_expr":{...},"op":"gt","right_value":0} or {"left_expr":{...},"op":"lt","right_expr":{...}}. Ops: lt,le,gt,ge,eq,ne,crosses_above,crosses_below.',
   }),
   order: Type.Optional(OrderConfig),
   pyramiding: Type.Optional(PyramidingConfig),

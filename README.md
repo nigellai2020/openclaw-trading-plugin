@@ -81,5 +81,5 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | `manage-agents`      | Guided workflow for listing, updating, and deleting agents |
 | `manage-wallets`     | Guided workflow for listing and deleting wallets |
 | `backtest`           | Guided workflow for running backtests    |
-| `strategy-reference` | Complete trading strategy schema reference |
+| `strategy-reference` | Loads the canonical trading strategy reference from `skills/strategy-reference/strategy.md` |
 | `nostr-identity`     | Retrieve user's Nostr identity           |
