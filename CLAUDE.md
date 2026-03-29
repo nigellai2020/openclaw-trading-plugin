@@ -15,7 +15,7 @@ An OpenClaw plugin for trading data, paper/live trading (Hyperliquid), copy-trad
 
 ## Architecture
 
-Single-file plugin (`src/tools.ts`, ~936 lines) using the OpenClaw `export default function(api)` pattern. Tools are registered via `api.registerTool()` with `@sinclair/typebox` schemas for parameters. Uses native `fetch` for HTTP calls.
+Modular OpenClaw plugin keeping `src/tools.ts` as the public entrypoint and moving schemas, shared helpers, and tool registration logic into dedicated folders. Tools are registered via `api.registerTool()` with `@sinclair/typebox` schemas for parameters. Uses native `fetch` for HTTP calls.
 
 ### Key patterns
 
@@ -38,8 +38,13 @@ Single-file plugin (`src/tools.ts`, ~936 lines) using the OpenClaw `export defau
 ### File structure
 
 ```
-src/tools.ts           — All 23 tool registrations
-skills/                — 7 skill definitions (trade, copy-trade, manage-agents, manage-wallets, backtest, strategy-reference, nostr-identity)
-scripts/               — Helper scripts (generate-agent-wallet, test-live-trading, create-ema-agent)
-openclaw.plugin.json   — Plugin config schema
+src/tools.ts                 — OpenClaw entrypoint
+src/tools/register-tools.ts  — Tool and service registrations
+src/context/                 — Shared runtime context for registrations
+src/schemas/                 — TypeBox schemas
+src/types/                   — Shared internal types
+src/utils/                   — Extracted helper functions
+skills/                      — 7 skill definitions (trade, copy-trade, manage-agents, manage-wallets, backtest, strategy-reference, nostr-identity)
+scripts/                     — Helper scripts (generate-agent-wallet, test-live-trading, create-ema-agent)
+openclaw.plugin.json         — Plugin config schema
 ```
