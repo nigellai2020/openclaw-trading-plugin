@@ -49,6 +49,7 @@ export type PreparedAgentCreationResult = {
     oswapBalance?: string;
     bnbBalance?: string;
     networkLabel?: string;
+    tokenAddress?: string;
     usesNostrPrivateKey: boolean;
   };
   nft: {

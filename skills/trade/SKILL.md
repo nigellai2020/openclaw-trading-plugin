@@ -92,68 +92,87 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 - Call `prepare_agent_creation` with:
   - Paper: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
   - Live: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
-- If `prepare_agent_creation.billing.required = false`, say no upfront billing setup is required and do not render a checkout card.
-- If `prepare_agent_creation.billing.required = true`, present the returned plan as a mini checkout page when there are real upfront costs. Follow this style and ordering closely. Keep OSWAP charges separate from BNB execution cost.
-
-```md
-💰 *Costs Breakdown*
-
-*1. NFT (required for agent creation)*
-- Show `Using existing eligible NFT` when `nft.hasEligibleNft = true`
-- Otherwise show `fees.oswapForNft` OSWAP
-
-*2. Agent creation fees*
-- Operating fee: `fees.operatingFee` OSWAP
-- Protocol fee: `fees.protocolFee` OSWAP
-- Strategy fee: `fees.strategyFee` OSWAP when greater than `0`
-- *Total fees: `fees.firstBillingAmount` OSWAP*
-
-*🔄 BNB → OSWAP Swap Needed*
-- If `fees.oswapShortfall > 0`, say the user does not have enough OSWAP and needs to swap for `fees.oswapShortfall` OSWAP
-- Estimated: `~funding.bnbForSwapMax` BNB
-
-*⛽ Gas Fees*
-- `~funding.bnbForGas` BNB
-
-*📊 Total BNB Required*
-- Swap: `funding.bnbForSwapMax` BNB
-- Gas: `funding.bnbForGas` BNB
-- *Total: `funding.totalBnbNeeded` BNB*
-
-- If `funding.bnbShortfall > 0`: `👉 You have wallet.bnbBalance BNB — send/add ~funding.bnbShortfall BNB on wallet.networkLabel (add buffer for safety)`
-- If `funding.bnbShortfall = 0`: `👉 You have enough BNB on wallet.networkLabel for this setup`
-
-*Billing note*
-- The agent creation fees become vault credit for billing. They are not burned.
-- Existing vault credit: `fees.existingVaultCredit` OSWAP
-- Additional vault deposit now: `fees.oswapForInitialVaultCredit` OSWAP
-- Include `fees.note` when helpful
-
-*🔁 Auto Renewal*
-- Billing subscription estimated end time: `subscription.estimatedEndTime`
-- For auto renewal, make sure there is at least `subscription.renewalAmount` OSWAP in the billing wallet by then
-```
-
-- Render rules:
-  - If `nft.hasEligibleNft = true`, do not show an NFT charge; show `Using existing eligible NFT`.
-  - If `fees.oswapShortfall = 0`, replace the swap section with a short line that existing OSWAP already covers the requirement.
-  - If `funding.bnbShortfall > 0`, make the top-up requirement explicit.
-  - If existing vault credit already covers the first period, still show the first billing amount and say no additional vault deposit is needed.
-  - If `fees.oswapForInitialVaultCredit > 0`, treat it as the amount being added as billing credit now.
-  - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, keep the response simple instead of rendering the full checkout card. A concise summary is fine, for example: existing eligible NFT, existing vault credit covers the first period, no upfront payment is needed now, and there should still be at least `subscription.renewalAmount` OSWAP in the billing wallet by `subscription.estimatedEndTime` for auto renewal.
+- If `prepare_agent_creation.billing.required = false`, say no upfront billing setup is required and skip to Step 8.
+- If `prepare_agent_creation.billing.required = true`, present the checkout page described below.
 - If `prepare_agent_creation` reports an `error`, STOP and explain it.
 
 ## Step 8 — Confirm before creating
-Present a summary:
-- Agent name, trading pair, strategy name
-- Indicators, entry/exit rules, risk settings
-- Initial capital
-- If paper: market type
-- If live: network, `chainId`, master wallet, agent wallet, leverage
-- If `prepare_agent_creation.billing.required = true`: include the mini checkout page
-- If `prepare_agent_creation.billing.required = false`: say no upfront billing setup is required
 
-Ask the user to confirm. Do NOT proceed until they explicitly confirm.
+If `billing.required = false`, present a simple agent summary (name, pair, strategy, indicators, entry/exit rules, risk settings, initial capital, mode/network details) and ask the user to confirm.
+
+If `billing.required = true`, present the full checkout page below. Follow this structure and ordering closely. Populate all fields from `prepare_agent_creation` response data.
+
+```md
+### 🚀 Confirm your agent setup
+
+Please review your agent before funding your wallet.
+
+## Agent
+
+*{name}*
+
+- *Mode:* {mode}
+- *Market:* {marketType}
+- *Symbol:* {symbol}
+- *Initial Capital:* ${initialCapital} {quote currency}
+- *Trading Environment:* {wallet.networkLabel} {add "(simulated)" for paper}
+
+## Strategy
+
+*{strategy name}*
+
+- {indicator summary, e.g. "EMA 20 (M15) + EMA 50 (M15)"}
+- {entry rule, e.g. "Buy when EMA 20 crosses above EMA 50"}
+- {exit rule, e.g. "Close when EMA 20 crosses below EMA 50"}
+- Stop-loss: {stop loss %}
+- Take-profit: {take profit %}
+- Cooldown: {cooldown}s
+
+## Billing
+
+- *{fees.firstBillingAmount} OSWAP due now* to start your first *rolling {subscription.renewalPeriodDays}-day billing period*
+- Your current billing period will end on *{subscription.estimatedEndTime}*
+- To keep this agent running, please make sure *{subscription.renewalAmount} OSWAP is available again by that time*
+- Billing is based on *{subscription.renewalPeriodDays}-day periods*, not calendar months
+
+## Fund your wallet on *{wallet.networkLabel}*
+
+You need:
+
+- *{fees.requiredOswap} OSWAP* for the first billing period
+- *~{funding.bnbForGas} BNB* for network fees
+
+### Option 1 — Easiest
+
+Send *~{funding.totalBnbNeeded} BNB* and I'll handle the swap and complete setup.
+
+### Option 2 — Manual
+
+Send:
+
+- *{fees.requiredOswap} OSWAP*
+- *~{funding.bnbForGas} BNB*
+
+## Funding details
+
+- *Wallet:* `{wallet.address}`
+- *Network:* {wallet.networkLabel}
+- *OSWAP token:* `{wallet.tokenAddress}`
+
+## Next step
+
+After funding your wallet, reply:
+*Done*
+```
+
+Render rules:
+  - If `nft.hasEligibleNft = true`, do not show an NFT charge in the billing section.
+  - If `fees.oswapShortfall = 0`, the user already has enough OSWAP — hide Option 1 (swap) and adjust the "You need" section to only show gas fees. Say existing OSWAP covers the requirement.
+  - If `funding.bnbShortfall = 0`, say wallet is already funded and skip the "Fund your wallet" and "Funding details" sections. Go straight to asking for confirmation.
+  - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, skip the funding sections entirely. Show a concise summary instead: existing eligible NFT, existing vault credit covers the first period, no upfront payment needed, remind about `subscription.renewalAmount` OSWAP by `subscription.estimatedEndTime` for auto renewal. Ask the user to confirm.
+  - For live mode, omit "Initial Capital" from the Agent section (it is auto-fetched from wallet balance).
+
+Ask the user to confirm or say "Done" after funding. Do NOT proceed until they explicitly confirm.
 
 ## Step 9 — Deploy agent
 Call `deploy_agent` with:
