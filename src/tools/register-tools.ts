@@ -254,7 +254,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "update_agent",
-    description: "Update a trading agent across the supported backends. Only explicitly provided fields are updated.",
+    description: "Update a trading agent via PUT /api/agent with delegateToTradingBot and delegateToSettlement flags so the server handles all downstream syncing. Only explicitly provided fields are updated.",
     parameters: Type.Object({
       agentId: Type.Number({ description: "Agent ID to update" }),
       name: Type.Optional(Type.String({ description: "Updated agent name" })),
@@ -482,16 +482,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "leverage",
         "strategyFeePerPeriod",
       ];
-      const botDirectFieldKeys = [
-        "name",
-        "avatarUrl",
-        "strategy",
-        "strategyDescription",
-        "isActive",
-        "mode",
-        "marketType",
-        "leverage",
-      ];
       const settlementConfigFieldKeys = [
         "walletId",
         "walletAddress",
@@ -502,33 +492,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "buyLimit",
       ];
 
-      if (hasOwnField(params, "mode")) {
-        warnings.push("mode is only updateable on the trading-bot; trading-data will continue to report the existing mode.");
-      }
-      if (hasOwnField(params, "marketType")) {
-        warnings.push("marketType is not updateable via trading-data. For live agents the settlement trader is recreated because the settlement PATCH API does not support market_type.");
-      }
-      const dataApiLimitedFields = [
-        "symbol",
-        "chainId",
-        "protocol",
-        "buyLimit",
-        "walletId",
-        "walletAddress",
-        "masterWalletAddress",
-        "simulationConfig",
-        "positionQty",
-        "slippage",
-        "expiration",
-      ].filter((field) => hasOwnField(params, field));
-      if (dataApiLimitedFields.length > 0) {
-        warnings.push(`trading-data does not persist these update fields: ${dataApiLimitedFields.join(", ")}`);
-      }
-      if (hasOwnField(params, "simulationConfig")) {
-        warnings.push("simulationConfig is only updateable on the trading-bot.");
-      }
       if (hasOwnField(params, "walletId")) {
-        warnings.push("walletId is used only to resolve walletAddress/masterWalletAddress for supported runtime backends; there is no direct walletId update endpoint for agents.");
+        warnings.push("walletId is used only to resolve walletAddress/masterWalletAddress; there is no direct walletId update endpoint for agents.");
       }
 
       const needsSettlementConfig =
@@ -616,57 +581,59 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       const mainUpdateRequested = mainFieldKeys.some((field) => hasOwnField(params, field));
-      if (mainUpdateRequested) {
+      {
         const tradingDataResult: Record<string, unknown> = {};
         let billingHeaders: Record<string, string> = {};
         let billingRequirement: UpdateAgentBillingRequirement = "unknown";
         let billingError: string | null = null;
 
-        try {
-          const billingBypassed = await fetchBillingBypassStatus(npub);
-          billingRequirement = billingBypassed ? "bypassed" : "required";
-        } catch (e: any) {
-          billingError = `billing bypass check failed: ${e.message}`;
-          tradingDataResult.billingBypassWarning = billingError;
-          warnings.push(`Could not confirm billing bypass status before trading-data update: ${e.message}`);
-        }
-
-        if (billingRequirement !== "bypassed") {
+        if (mainUpdateRequested) {
           try {
-            const billingWallet = buildBillingWallet();
-            tradingDataResult.billingWalletRegistration = await ensureBillingWalletRegistered({
-              npub,
-              publicKey,
-              privateKey,
-              wallet: billingWallet,
-            });
-            billingHeaders = await buildBillingHeaders(billingWallet);
+            const billingBypassed = await fetchBillingBypassStatus(npub);
+            billingRequirement = billingBypassed ? "bypassed" : "required";
           } catch (e: any) {
-            billingError = e.message;
-            tradingDataResult.billingWarning = e.message;
-            warnings.push(`Billing wallet registration failed before trading-data update: ${e.message}`);
+            billingError = `billing bypass check failed: ${e.message}`;
+            tradingDataResult.billingBypassWarning = billingError;
+            warnings.push(`Could not confirm billing bypass status before trading-data update: ${e.message}`);
           }
-        }
 
-        const billingDecision = decideUpdateAgentBilling({
-          requirement: billingRequirement,
-          billingHeaders,
-          billingError,
-        });
-        if (!billingDecision.canProceed) {
-          result.error = billingDecision.error;
-          result.tradingData = {
-            ...tradingDataResult,
-            ok: false,
-            blocked: true,
-            requirement: billingDecision.requirement,
-            requiresBillingHeaders: billingDecision.requiresBillingHeaders,
-            hasBillingHeaders: billingDecision.hasBillingHeaders,
-            error: billingDecision.error,
-          };
-          result.warnings = Array.from(new Set(warnings));
-          debugLog("update_agent", "result", result);
-          return textResult(result);
+          if (billingRequirement !== "bypassed") {
+            try {
+              const billingWallet = buildBillingWallet();
+              tradingDataResult.billingWalletRegistration = await ensureBillingWalletRegistered({
+                npub,
+                publicKey,
+                privateKey,
+                wallet: billingWallet,
+              });
+              billingHeaders = await buildBillingHeaders(billingWallet);
+            } catch (e: any) {
+              billingError = e.message;
+              tradingDataResult.billingWarning = e.message;
+              warnings.push(`Billing wallet registration failed before trading-data update: ${e.message}`);
+            }
+          }
+
+          const billingDecision = decideUpdateAgentBilling({
+            requirement: billingRequirement,
+            billingHeaders,
+            billingError,
+          });
+          if (!billingDecision.canProceed) {
+            result.error = billingDecision.error;
+            result.tradingData = {
+              ...tradingDataResult,
+              ok: false,
+              blocked: true,
+              requirement: billingDecision.requirement,
+              requiresBillingHeaders: billingDecision.requiresBillingHeaders,
+              hasBillingHeaders: billingDecision.hasBillingHeaders,
+              error: billingDecision.error,
+            };
+            result.warnings = Array.from(new Set(warnings));
+            debugLog("update_agent", "result", result);
+            return textResult(result);
+          }
         }
 
         const logSignature = Signer.getSignature(
@@ -689,6 +656,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           id: params.agentId,
           signature: logSignature,
           timestamp: signedAt,
+          delegateToTradingBot: true,
+          delegateToSettlement: true,
+          prevMode: currentMode,
         };
         if (hasOwnField(params, "name")) body.name = params.name;
         if (hasOwnField(params, "description")) body.description = params.description;
@@ -698,6 +668,14 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (hasOwnField(params, "isActive")) body.isActive = params.isActive;
         if (hasOwnField(params, "leverage")) body.leverage = params.leverage;
         if (hasOwnField(params, "strategyFeePerPeriod")) body.strategyFeePerPeriod = params.strategyFeePerPeriod;
+        if (hasOwnField(params, "mode")) body.mode = targetMode;
+        if (hasOwnField(params, "marketType")) body.marketType = targetMarketType;
+        if (hasOwnField(params, "symbol")) body.symbol = params.symbol;
+        if (hasOwnField(params, "chainId")) body.chainId = params.chainId;
+        if (hasOwnField(params, "walletAddress")) body.walletAddress = resolvedWalletAddress;
+        if (hasOwnField(params, "buyLimit")) body.buyLimit = params.buyLimit;
+        if (hasOwnField(params, "protocol")) body.protocol = params.protocol;
+        if (settlementConfigPayload) body.settlement_config = settlementConfigPayload;
 
         debugLog("update_agent", "trading-data.req", { url: `${baseUrl}/api/agent`, body, hasBillingHeaders: Object.keys(billingHeaders).length > 0 });
         const res = await fetch(`${baseUrl}/api/agent`, {
@@ -723,319 +701,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           debugLog("update_agent", "result", result);
           return textResult(result);
         }
-      } else {
-        result.tradingData = { skipped: true };
-      }
-
-      const botNeedsUpdate =
-        botDirectFieldKeys.some((field) => hasOwnField(params, field)) ||
-        settlementConfigPayload != null ||
-        simulationConfigPayload != null;
-      if (botNeedsUpdate) {
-        const botBody: Record<string, unknown> = {
-          signed_at: signedAt,
-        };
-        if (hasOwnField(params, "name")) botBody.name = params.name;
-        if (hasOwnField(params, "avatarUrl")) botBody.avatar_url = params.avatarUrl;
-        if (hasOwnField(params, "strategy")) botBody.strategy_config = params.strategy;
-        if (hasOwnField(params, "strategyDescription")) botBody.description = params.strategyDescription;
-        if (hasOwnField(params, "mode")) botBody.mode = targetMode;
-        if (hasOwnField(params, "isActive")) botBody.active = params.isActive;
-        if (hasOwnField(params, "marketType")) botBody.market_type = targetMarketType;
-        if (hasOwnField(params, "leverage")) botBody.leverage = params.leverage;
-        if (settlementConfigPayload) botBody.settlement_config = JSON.stringify(settlementConfigPayload);
-        if (simulationConfigPayload) botBody.simulation_config = simulationConfigPayload;
-
-        const botSignature = Signer.getSignature(
-          {
-            agent_id: params.agentId,
-            signed_at: signedAt,
-          },
-          privateKey,
-          {
-            agent_id: "number",
-            signed_at: "number",
-          } as const,
-        );
-
-        debugLog("update_agent", "trading-bot.req", { url: `${tradingBotUrl}/agents/${params.agentId}`, body: botBody });
-        const res = await fetch(`${tradingBotUrl}/agents/${params.agentId}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            "x-public-key": publicKey,
-            "x-signature": botSignature,
-          },
-          body: JSON.stringify(botBody),
-        });
-        const responseBody = await parseResponseBody(res);
-        const ok = res.ok && responseBody?.success !== false;
-        result.tradingBot = {
-          ok,
-          status: res.status,
-          body: responseBody,
-        };
-        debugLog("update_agent", "trading-bot.res", result.tradingBot);
-      } else {
-        result.tradingBot = { skipped: true };
-      }
-
-      const currentIsLive = currentMode === "live";
-      const targetIsLive = targetMode === "live";
-      const marketTypeChanged = targetMarketType !== currentMarketType;
-      const masterWalletChanged =
-        targetIsLive &&
-        normalizeAddress(resolvedMasterWalletAddress) !== normalizeAddress(currentMasterWalletAddress) &&
-        (hasOwnField(params, "masterWalletAddress") || hasOwnField(params, "walletId"));
-      const agentAddressChanged =
-        targetIsLive &&
-        normalizeAddress(resolvedWalletAddress) !== normalizeAddress(currentWalletAddress) &&
-        (hasOwnField(params, "walletAddress") || hasOwnField(params, "walletId"));
-
-      const settlementCreateNeeded = !currentIsLive && targetIsLive;
-      const settlementDeleteNeeded = currentIsLive && !targetIsLive;
-      const settlementRecreateNeeded = currentIsLive && targetIsLive && (marketTypeChanged || masterWalletChanged);
-      const settlementPatchNeeded =
-        currentIsLive &&
-        targetIsLive &&
-        !settlementRecreateNeeded &&
-        (
-          agentAddressChanged ||
-          hasOwnField(params, "symbol") ||
-          hasOwnField(params, "chainId") ||
-          hasOwnField(params, "protocol") ||
-          hasOwnField(params, "buyLimit") ||
-          hasOwnField(params, "positionQty") ||
-          hasOwnField(params, "slippage") ||
-          hasOwnField(params, "expiration") ||
-          hasOwnField(params, "leverage") ||
-          hasOwnField(params, "isActive")
-        );
-
-      const settlementActionNeeded =
-        settlementCreateNeeded ||
-        settlementDeleteNeeded ||
-        settlementRecreateNeeded ||
-        settlementPatchNeeded;
-
-      if (!settlementActionNeeded) {
-        result.settlement = { skipped: true };
-        if (settlementConfigFieldKeys.some((field) => hasOwnField(params, field)) && !targetIsLive) {
-          warnings.push("Requested live settlement fields were applied only to the trading-bot because the agent remains in paper mode.");
-        }
-      } else {
-        const settlementResult: Record<string, any> = {
-          skipped: false,
-          action: settlementRecreateNeeded
-            ? "recreate"
-            : settlementCreateNeeded
-              ? "create"
-              : settlementDeleteNeeded
-                ? "delete"
-                : "patch",
-          ok: true,
-          steps: [] as Array<Record<string, unknown>>,
-        };
-        const settlementDeleteSignature = Signer.getSignature(
-          {
-            trader_id: params.agentId,
-            signed_at: signedAt,
-          },
-          privateKey,
-          {
-            trader_id: "number",
-            signed_at: "number",
-          } as const,
-        );
-
-        const settleStep = async (
-          step: string,
-          url: string,
-          init: RequestInit,
-          acceptNotFound = false,
-        ): Promise<boolean> => {
-          debugLog("update_agent", `settlement.${step}.req`, { url, method: init.method, body: init.body });
-          const res = await fetch(url, init);
-          const body = await parseResponseBody(res);
-          const message = responseErrorMessage(body).toLowerCase();
-          const ok = res.ok && body?.result !== false;
-          const allowedNotFound = acceptNotFound && message.includes("not found");
-          const finalOk = ok || allowedNotFound;
-          settlementResult.steps.push({
-            step,
-            ok: finalOk,
-            status: res.status,
-            body,
-            toleratedNotFound: allowedNotFound || undefined,
-          });
-          debugLog("update_agent", `settlement.${step}.res`, {
-            step,
-            ok: finalOk,
-            status: res.status,
-            body,
-            toleratedNotFound: allowedNotFound,
-          });
-          if (!finalOk) {
-            settlementResult.ok = false;
-          } else if (allowedNotFound) {
-            warnings.push(`Settlement step "${step}" reported trader not found; continuing with best-effort recreation.`);
-          }
-          return finalOk;
-        };
-
-        if (settlementDeleteNeeded || settlementRecreateNeeded) {
-          const deleteBody = {
-            trader_id: params.agentId,
-            signed_at: signedAt,
-          };
-          const deleteOk = await settleStep(
-            "delete",
-            `${settlementEngineUrl}/traders/${params.agentId}`,
-            {
-              method: "DELETE",
-              headers: {
-                "Content-Type": "application/json",
-                "x-public-key": publicKey,
-                "x-signature": settlementDeleteSignature,
-              },
-              body: JSON.stringify(deleteBody),
-            },
-            settlementRecreateNeeded,
-          );
-          if (!deleteOk) {
-            result.settlement = settlementResult;
-            result.warnings = Array.from(new Set(warnings));
-            debugLog("update_agent", "result", result);
-            return textResult(result);
-          }
-        }
-
-        if (settlementCreateNeeded || settlementRecreateNeeded) {
-          const missing: string[] = [];
-          if (!resolvedMasterWalletAddress) missing.push("masterWalletAddress");
-          if (!resolvedWalletAddress) missing.push("walletAddress");
-          if (!resolvedSymbol) missing.push("symbol");
-          if (resolvedChainId == null) missing.push("chainId");
-          if (resolvedBuyLimit == null) missing.push("buyLimit");
-          if (missing.length > 0) {
-            return textResult({
-              ...result,
-              settlement: settlementResult,
-              error: `Cannot create live settlement trader. Missing companion fields: ${missing.join(", ")}`,
-            });
-          }
-
-          const createBody: Record<string, unknown> = {
-            trader_id: params.agentId,
-            owner: npub,
-            eth_address: resolvedMasterWalletAddress,
-            agent_address: resolvedWalletAddress,
-            symbol: resolvedSymbol,
-            chain_id: resolvedChainId,
-            market_type: targetMarketType,
-            venue_type: targetMarketType === "perp" ? "dex_orderbook" : "dex_amm",
-            buy_limit_usd: resolvedBuyLimit,
-            signed_at: signedAt,
-          };
-          if (resolvedProtocol) createBody.protocol = resolvedProtocol;
-          if (resolvedLeverage != null) createBody.leverage = resolvedLeverage;
-          if (hasOwnField(params, "slippage")) createBody.slippage = params.slippage;
-          if (hasOwnField(params, "expiration")) createBody.expiration = params.expiration;
-
-          const createSignature = Signer.getSignature(
-            createBody,
-            privateKey,
-            {
-              trader_id: "number",
-              eth_address: "string",
-              symbol: "string",
-              chain_id: "number",
-              signed_at: "number",
-            } as const,
-          );
-          const createOk = await settleStep(
-            "create",
-            `${settlementEngineUrl}/traders`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "x-public-key": publicKey,
-                "x-signature": createSignature,
-              },
-              body: JSON.stringify(createBody),
-            },
-          );
-
-          if (createOk && (hasOwnField(params, "positionQty") || hasOwnField(params, "isActive"))) {
-            const followUpBody: Record<string, unknown> = {
-              trader_id: params.agentId,
-              signed_at: signedAt,
-            };
-            if (hasOwnField(params, "positionQty")) followUpBody.position_qty = params.positionQty;
-            if (hasOwnField(params, "isActive")) followUpBody.is_active = params.isActive;
-            const followUpSignature = Signer.getSignature(
-              followUpBody,
-              privateKey,
-              {
-                trader_id: "number",
-                signed_at: "number",
-              } as const,
-            );
-            await settleStep(
-              "patch_after_create",
-              `${settlementEngineUrl}/traders/${params.agentId}`,
-              {
-                method: "PATCH",
-                headers: {
-                  "Content-Type": "application/json",
-                  "x-public-key": publicKey,
-                  "x-signature": followUpSignature,
-                },
-                body: JSON.stringify(followUpBody),
-              },
-            );
-          }
-        } else if (settlementPatchNeeded) {
-          const patchBody: Record<string, unknown> = {
-            trader_id: params.agentId,
-            signed_at: signedAt,
-          };
-          if (agentAddressChanged) patchBody.agent_address = resolvedWalletAddress;
-          if (hasOwnField(params, "symbol")) patchBody.symbol = params.symbol;
-          if (hasOwnField(params, "chainId")) patchBody.chain_id = params.chainId;
-          if (hasOwnField(params, "protocol")) patchBody.protocol = params.protocol;
-          if (hasOwnField(params, "buyLimit")) patchBody.buy_limit_usd = params.buyLimit;
-          if (hasOwnField(params, "positionQty")) patchBody.position_qty = params.positionQty;
-          if (hasOwnField(params, "slippage")) patchBody.slippage = params.slippage;
-          if (hasOwnField(params, "expiration")) patchBody.expiration = params.expiration;
-          if (hasOwnField(params, "leverage")) patchBody.leverage = params.leverage;
-          if (hasOwnField(params, "isActive")) patchBody.is_active = params.isActive;
-
-          const patchSignature = Signer.getSignature(
-            patchBody,
-            privateKey,
-            {
-              trader_id: "number",
-              signed_at: "number",
-            } as const,
-          );
-          await settleStep(
-            "patch",
-            `${settlementEngineUrl}/traders/${params.agentId}`,
-            {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-                "x-public-key": publicKey,
-                "x-signature": patchSignature,
-              },
-              body: JSON.stringify(patchBody),
-            },
-          );
-        }
-
-        result.settlement = settlementResult;
       }
 
       try {
@@ -1557,10 +1222,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         approvals: preparedContext.prepared.executionPlan.approvals,
         depositToVault: preparedContext.prepared.executionPlan.depositToVault,
         actions: [
-          "Create the copied live agent via POST /api/copy-agent.",
-          "Sync the copied agent to trading-bot via POST /api/notify-agent-creation.",
+          "Create the copied live agent via POST /api/copy-agent (with delegateToSettlement for automatic trading-bot and settlement syncing).",
           "Authorize the selected wallet via POST /api/wallets/authorize.",
-          "Register the copied agent on the settlement engine via POST /traders.",
         ],
       };
 
@@ -1570,7 +1233,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Replaces sequential calls to create_agent + notify_trading_bot + register_trader + log_agent_action + get_agent.",
+    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Uses delegateToTradingBot and delegateToSettlement flags on POST /api/agent so the server handles all downstream syncing internally.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount (auto-fetched for live mode)" })),
@@ -1578,13 +1241,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       marketType: Type.Optional(Type.String({ description: '"spot" or "perp"', default: "spot" })),
       strategy: Strategy,
       strategyDescription: Type.Optional(Type.String({ description: "Human-readable strategy summary" })),
-      simulationConfig: Type.Optional(SimulationConfig),
-      walletId: Type.Optional(Type.Number({ description: "Wallet ID (live mode)" })),
+      assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation (used when delegateToTradingBot is true).' })),
       walletAddress: Type.Optional(Type.String({ description: "Agent wallet address (live mode)" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (live mode, for settlement)" })),
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
-      protocol: Type.Optional(Type.String({ description: '"hyperliquid"', default: "hyperliquid" })),
-      chainId: Type.Optional(Type.Number({ description: "Live mode only: 998=testnet, 999=mainnet" })),
+      chainId: Type.Optional(Type.Number({ description: "Network chain ID for both paper and live modes (e.g. Hyperliquid: 998/999, EVM: 1/56)." })),
       leverage: Type.Optional(Type.Number({ description: "Leverage multiplier" })),
     }),
     async execute(
@@ -1596,12 +1257,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         marketType?: string;
         strategy: Record<string, unknown>;
         strategyDescription?: string;
-        simulationConfig?: { asset_type: string; protocol?: string; chain_id?: number };
-        walletId?: number;
+        assetType?: string;
         walletAddress?: string;
         masterWalletAddress?: string;
         symbol?: string;
-        protocol?: string;
         chainId?: number;
         leverage?: number;
       },
@@ -1611,14 +1270,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const mode = params.mode ?? "paper";
       const isLive = mode === "live";
       let marketType: "spot" | "perp" = "spot";
-      let liveChainId: 998 | 999 | undefined;
       try {
         marketType = resolveMarketType(mode, params.marketType);
         if (isLive) {
-          liveChainId = resolveLiveChainId(params.chainId);
-          if (params.walletId == null) {
-            return textResult({ error: "walletId is required for live mode" });
-          }
           if (!params.walletAddress) {
             return textResult({ error: "walletAddress is required for live mode" });
           }
@@ -1639,20 +1293,27 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // Auto-fetch initial capital for live mode
       let initialCapital = params.initialCapital;
       if (isLive && initialCapital == null && params.masterWalletAddress) {
-        const balance = await fetchUsdcBalance(params.masterWalletAddress, liveChainId!);
-        if (balance === 0) {
-          const appUrl = liveChainId === 999
-            ? "https://app.hyperliquid.xyz"
-            : "https://app.hyperliquid-testnet.xyz";
-          return textResult({
-            error: `Wallet ${params.masterWalletAddress} has 0 USDC balance. Deposit USDC before deploying: ${appUrl}`,
-          });
+        if (params.chainId === 998 || params.chainId === 999) {
+          const balance = await fetchUsdcBalance(params.masterWalletAddress, params.chainId);
+          if (balance === 0) {
+            const appUrl = params.chainId === 999
+              ? "https://app.hyperliquid.xyz"
+              : "https://app.hyperliquid-testnet.xyz";
+            return textResult({
+              error: `Wallet ${params.masterWalletAddress} has 0 USDC balance. Deposit USDC before deploying: ${appUrl}`,
+            });
+          }
+          initialCapital = balance;
+          debugLog("deploy_agent", "auto-fetched balance", { initialCapital, chainId: params.chainId });
         }
-        initialCapital = balance;
-        debugLog("deploy_agent", "auto-fetched balance", { initialCapital });
       }
       if (initialCapital == null) {
-        return textResult({ error: "initialCapital is required for paper mode" });
+        if (isLive && params.chainId != null && params.chainId !== 998 && params.chainId !== 999) {
+          return textResult({
+            error: "initialCapital is required for live mode when chainId is not Hyperliquid (998/999)",
+          });
+        }
+        return textResult({ error: "initialCapital is required" });
       }
 
       // Default leverage to 3x for live mode
@@ -1839,25 +1500,22 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       try {
         const payload: Record<string, unknown> = {
           name: params.name,
-          avatarUrl: "",
           initialCapital,
           mode,
           marketType,
           owner: npub,
-          pubkey: Nip19.npubEncode(publicKey),
-          isActive: true,
         };
         if (leverage != null) payload.leverage = leverage;
         if (buyLimit != null) payload.buyLimit = buyLimit;
-        if (isLive) payload.chainId = liveChainId;
-        if (params.simulationConfig) payload.simulationConfig = params.simulationConfig;
+        if (params.chainId != null) payload.chainId = params.chainId;
+        if (params.assetType) payload.assetType = params.assetType;
         if (params.strategy) payload.strategy = params.strategy;
         if (params.strategyDescription) payload.strategyDescription = params.strategyDescription;
-        if (params.walletId != null) payload.walletId = params.walletId;
         if (params.walletAddress) payload.walletAddress = params.walletAddress;
         if (params.symbol) payload.symbol = params.symbol;
-        if (params.protocol) payload.protocol = params.protocol;
         if (settlementConfig) payload.settlement_config = settlementConfig;
+        payload.delegateToTradingBot = true;
+        if (isLive) payload.delegateToSettlement = true;
 
         debugLog("deploy_agent", "create.api.req POST /api/agent", payload);
         const res = await fetch(`${baseUrl}/api/agent`, {
@@ -1885,103 +1543,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         return textResult(result);
       }
 
-      // Step 2: Notify trading bot
-      try {
-        const signedAt = Math.floor(Date.now() / 1000);
-        const body: Record<string, unknown> = {
-          id: agentId,
-          name: params.name,
-          owner: npub,
-          avatar_url: null,
-          initial_capital: initialCapital,
-          strategy_config: params.strategy,
-          description: params.strategyDescription ?? null,
-          mode,
-          signed_at: signedAt,
-          market_type: marketType,
-        };
-        if (leverage != null) body.leverage = leverage;
-        if (isLive && settlementConfig) {
-          body.settlement_config = JSON.stringify({
-            ...settlementConfig,
-            symbol: params.symbol,
-            chain_id: liveChainId,
-            protocol: params.protocol ?? "hyperliquid",
-            buy_limit_usd: buyLimit,
-          });
-        }
-        if (params.simulationConfig) body.simulation_config = params.simulationConfig;
-
-        const signature = Signer.getSignature(body, privateKey, {
-          id: "number",
-          name: "string",
-          initial_capital: "number",
-          signed_at: "number",
-        } as const);
-
-        debugLog("deploy_agent", "notify.api.req POST bot/agents", body);
-        const res = await fetch(`${tradingBotUrl}/agents`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-public-key": publicKey,
-            "x-signature": signature,
-          },
-          body: JSON.stringify(body),
-        });
-        const resBody = res.ok ? await res.json().catch(() => null) : await res.text().catch(() => null);
-        debugLog("deploy_agent", "notify.api.res", { status: res.status, responseBody: resBody });
-        result.notify = { ok: res.ok };
-        if (!res.ok) (result.notify as any).error = `${res.status}`;
-      } catch (e: any) {
-        result.notify = { ok: false, error: e.message };
-      }
-
-      // Step 3: Register trader in settlement engine (live only)
-      if (isLive && params.masterWalletAddress && params.walletAddress) {
-        try {
-          const signedAt = Math.floor(Date.now() / 1000);
-          const traderBody: Record<string, unknown> = {
-            trader_id: agentId,
-            owner: npub,
-            eth_address: params.masterWalletAddress,
-            agent_address: params.walletAddress,
-            symbol: params.symbol!,
-            chain_id: liveChainId!,
-            market_type: marketType,
-            venue_type: marketType === "perp" ? "dex_orderbook" : "dex_amm",
-            buy_limit_usd: buyLimit!,
-            signed_at: signedAt,
-          };
-          if (params.protocol) traderBody.protocol = params.protocol;
-          const signature = Signer.getSignature(traderBody, privateKey, {
-            trader_id: "number",
-            eth_address: "string",
-            symbol: "string",
-            chain_id: "number",
-            signed_at: "number",
-          } as const);
-
-          debugLog("deploy_agent", "trader.api.req POST /traders", traderBody);
-          const res = await fetch(`${settlementEngineUrl}/traders`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-public-key": publicKey,
-              "x-signature": signature,
-            },
-            body: JSON.stringify(traderBody),
-          });
-          const resBody = res.ok ? await res.json().catch(() => null) : await res.text().catch(() => null);
-          debugLog("deploy_agent", "trader.api.res", { status: res.status, responseBody: resBody });
-          result.registerTrader = { ok: res.ok };
-          if (!res.ok) (result.registerTrader as any).error = `${res.status}`;
-        } catch (e: any) {
-          result.registerTrader = { ok: false, error: e.message };
-        }
-      }
-
-      // Step 4: Log action
+      // Step 2: Log action
       try {
         const timestamp = Math.floor(Date.now() / 1000);
         const sigData = {
@@ -2014,7 +1576,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         result.log = { ok: false };
       }
 
-      // Step 5: Verify
+      // Step 3: Verify
       try {
         const res = await fetch(`${baseUrl}/api/agent/${agentId}`);
         const verifyBody = await res.json().catch(() => null);
@@ -2068,7 +1630,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "deploy_copy_agent",
-    description: "Create a live copy-trading agent from an existing source agent. Executes the current UI/backend flow: copy-agent, notify-agent-creation, wallet authorization, settlement registration, and verification.",
+    description: "Create a live copy-trading agent from an existing source agent. Executes the flow: copy-agent (with delegateToSettlement for server-side trading-bot and settlement syncing), wallet authorization, and verification.",
     parameters: Type.Object({
       sourceAgentId: Type.Number({ description: "Existing source agent ID to copy" }),
       alias: Type.Optional(Type.String({ description: "Optional display name for the copied agent. Defaults to the source agent name." })),
@@ -2491,6 +2053,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           buyLimit: resolvedBuyLimit,
           signature,
           timestamp,
+          delegateToSettlement: true,
+          settlement_config: settlementConfig,
         };
         if (alias) copyBody.alias = alias;
         if (params.order) copyBody.order = params.order;
@@ -2537,54 +2101,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       try {
-        const signedAt = Math.floor(Date.now() / 1000);
-        const notifySignature = Signer.getSignature(
-          {
-            id: copiedAgentId,
-            name: effectiveName,
-            initial_capital: copiedAgentInitialCapital,
-            signed_at: signedAt,
-          },
-          privateKey,
-          {
-            id: "number",
-            name: "string",
-            initial_capital: "number",
-            signed_at: "number",
-          } as const,
-        );
-        const notifyBody = {
-          agentId: copiedAgentId,
-          signed_at: signedAt,
-          settlement_config: settlementConfig,
-        };
-        debugLog("deploy_copy_agent", "notify.api.req POST /api/notify-agent-creation", notifyBody);
-        const res = await fetch(`${baseUrl}/api/notify-agent-creation`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: auth,
-            "x-public-key": publicKey,
-            "x-signature": notifySignature,
-          },
-          body: JSON.stringify(notifyBody),
-        });
-        const body = await parseResponseBody(res);
-        debugLog("deploy_copy_agent", "notify.api.res POST /api/notify-agent-creation", { status: res.status, body });
-        result.notify = {
-          ok: res.ok,
-          status: res.status,
-          body,
-        };
-        if (!res.ok) {
-          warnings.push(`Trading-bot notification failed after copy creation: ${responseErrorMessage(body)}`);
-        }
-      } catch (e: any) {
-        result.notify = { ok: false, error: e.message };
-        warnings.push(`Trading-bot notification failed after copy creation: ${e.message}`);
-      }
-
-      try {
         const createdAt = Math.floor(Date.now() / 1000);
         const walletSignature = buildWalletActionSignature(
           privateKey,
@@ -2623,61 +2139,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       } catch (e: any) {
         result.authorizeWallet = { ok: false, error: e.message };
         warnings.push(`Wallet authorization failed after copy creation: ${e.message}`);
-      }
-
-      try {
-        const signedAt = Math.floor(Date.now() / 1000);
-        const traderBody: Record<string, unknown> = {
-          trader_id: copiedAgentId,
-          owner: npub,
-          eth_address: resolvedMasterWalletAddress,
-          symbol: sourceSymbol,
-          chain_id: resolvedChainId,
-          market_type: sourceMarketType,
-          venue_type: sourceMarketType === "perp" ? "dex_orderbook" : "dex_amm",
-          buy_limit_usd: resolvedBuyLimit,
-          signed_at: signedAt,
-        };
-        if (normalizeAddress(resolvedMasterWalletAddress) !== normalizeAddress(resolvedWalletAddress)) {
-          traderBody.agent_address = resolvedWalletAddress;
-        }
-        if (resolvedProtocol) {
-          traderBody.protocol = resolvedProtocol;
-        }
-        const traderSignature = Signer.getSignature(
-          traderBody,
-          privateKey,
-          {
-            trader_id: "number",
-            eth_address: "string",
-            symbol: "string",
-            chain_id: "number",
-            signed_at: "number",
-          } as const,
-        );
-        debugLog("deploy_copy_agent", "trader.api.req POST /traders", traderBody);
-        const res = await fetch(`${settlementEngineUrl}/traders`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-public-key": publicKey,
-            "x-signature": traderSignature,
-          },
-          body: JSON.stringify(traderBody),
-        });
-        const body = await parseResponseBody(res);
-        debugLog("deploy_copy_agent", "trader.api.res POST /traders", { status: res.status, body });
-        result.registerTrader = {
-          ok: res.ok,
-          status: res.status,
-          body,
-        };
-        if (!res.ok) {
-          warnings.push(`Settlement registration failed after copy creation: ${responseErrorMessage(body)}`);
-        }
-      } catch (e: any) {
-        result.registerTrader = { ok: false, error: e.message };
-        warnings.push(`Settlement registration failed after copy creation: ${e.message}`);
       }
 
       try {
@@ -2777,7 +2238,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "delete_agent",
-    description: "Delete a trading agent by ID. Removes from all backend services.",
+    description: "Delete a trading agent by ID. Delegates removal to trading-bot and settlement engine via DELETE /api/agent/:id with delegateToTradingBot and delegateToSettlement flags.",
     parameters: Type.Object({
       agentId: Type.Number({ description: "Agent ID to delete" }),
     }),
@@ -2796,26 +2257,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const agentData = await agentRes.json();
       const isLive = agentData?.data?.mode === "live";
 
-      // Step 1: Deactivate trader in settlement engine (live only)
-      if (isLive) {
-        try {
-          const body = { trader_id: params.agentId, signed_at: signedAt };
-          const signature = Signer.getSignature(body, privateKey, {
-            trader_id: "number", signed_at: "number",
-          } as const);
-          const res = await fetch(`${settlementEngineUrl}/traders/${params.agentId}`, {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json", "x-public-key": publicKey, "x-signature": signature },
-            body: JSON.stringify(body),
-          });
-          debugLog("delete_agent", "settlement.res", { status: res.status });
-          result.settlement = { ok: res.ok };
-        } catch (e: any) {
-          result.settlement = { ok: false, error: e.message };
-        }
-      }
-
-      // Step 2: Delete from trading-data
+      // Step 1: Delete from trading-data (delegates to trading-bot and settlement engine)
       try {
         const sigData = { agent_id: params.agentId, action: "delete", user: npub, timestamp: signedAt };
         const signature = Signer.getSignature(sigData, privateKey, {
@@ -2829,32 +2271,12 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             Authorization: auth,
             ...billingHeaders,
           },
-          body: JSON.stringify({ signature, timestamp: signedAt }),
+          body: JSON.stringify({ signature, timestamp: signedAt, delegateToTradingBot: true, delegateToSettlement: true }),
         });
         debugLog("delete_agent", "trading-data.res", { status: res.status });
         result.tradingData = { ok: res.ok };
       } catch (e: any) {
         result.tradingData = { ok: false, error: e.message };
-      }
-
-      // Step 3: Delete from trading-bot
-      try {
-        const deleteSigData = { agent_id: params.agentId, signed_at: signedAt };
-        const signature = Signer.getSignature(deleteSigData, privateKey, {
-          agent_id: "number",
-          signed_at: "number",
-        } as const);
-        const res = await fetch(`${tradingBotUrl}/agents/${params.agentId}?signed_at=${signedAt}`, {
-          method: "DELETE",
-          headers: {
-            "x-public-key": publicKey,
-            "x-signature": signature,
-          },
-        });
-        debugLog("delete_agent", "trading-bot.res", { status: res.status });
-        result.tradingBot = { ok: res.ok };
-      } catch (e: any) {
-        result.tradingBot = { ok: false, error: e.message };
       }
 
       debugLog("delete_agent", "result", result);
@@ -3059,7 +2481,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobIds: params.jobIds }),
       });
-      if (!res.ok) throw new Error(`get_backtest_status failed: ${res.status}`);
+      if (!res.ok) throw new Error(`get__status failed: ${res.status}`);
       return textResult(await res.json());
     },
   });

@@ -26,12 +26,9 @@ Handle the response:
   - If `billing.required = false`, say no upfront billing setup is required.
   - If `billing.required = true`, present the returned billing, NFT, fee, gas, and funding details before deployment, following the same style used in the normal `trade` flow.
 - Do **not** ask the user for market type.
-- If `sourceAgent.mode = "paper"` or `defaults.chainId` is missing, ask the user which live Hyperliquid network to use:
-  - `testnet`
-  - `mainnet`
-- Derive live `chainId` from that user choice:
-  - `testnet` -> `998`
-  - `mainnet` -> `999`
+- Copy-trade is always live mode. If `sourceAgent.mode = "paper"` or `defaults.chainId` is missing, ask the user which network/chain to use. For Hyperliquid:
+  - `testnet` → `998`
+  - `mainnet` → `999`
 - Only skip the network question when the source agent already implies it through `defaults.chainId`.
 - Do **not** ask the user to build a new strategy.
 
@@ -100,8 +97,6 @@ Important:
 Handle the response:
 - **create.ok = false**: Report the error and STOP.
 - **billing.required = true**: Present the billing result and any deposit or renewal details returned by the tool.
-- **notify.ok = false**: Warn but continue.
-- **authorizeWallet.ok = false**: Warn that wallet authorization failed.
-- **registerTrader.ok = false**: Warn that settlement registration failed and the copied agent may not trade yet.
-- **verify.ok = false**: Warn that verification did not fully succeed.
-- Present the new agent ID, source agent ID, pair, and any warnings returned by the tool.
+- **authorizeWallet.ok = false**: Warn that wallet authorization failed — the agent was created but the wallet link may not be active yet.
+- **verify.ok = false**: Warn that post-creation verification did not fully succeed.
+- Present the new agent ID, source agent ID, pair, and any warnings returned in `result.warnings`.
