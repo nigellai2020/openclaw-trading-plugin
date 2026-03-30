@@ -1,6 +1,6 @@
 ---
 name: trade
-description: Create a new paper or live trading agent. Use when the user wants to start trading, deploy a new trading agent, set up paper trading, or trade on Hyperliquid. Do not use this skill to copy an existing agent.
+description: Create a new paper or live trading agent. Use when the user wants to start trading, deploy a new trading agent, set up paper trading, or trade on Hyperliquid or EVM networks. Do not use this skill to copy an existing agent.
 ---
 
 # Trading Agent Creation
@@ -12,15 +12,19 @@ If the user wants to copy, follow, or duplicate an existing agent, use the `copy
 ## Step 1 — Ask trading mode and resolve market/network
 Ask the user: **paper** or **live** mode?
 - Paper: simulated trading, no real funds
-- Live: real trading on Hyperliquid (testnet or mainnet)
+- Live: real trading on Hyperliquid or EVM networks
 
 Then resolve the missing choices before continuing:
 - If the user did not already specify a market type, ask: **spot** or **perp**?
-- If **live** and the user did not already specify a network, ask: **testnet** or **mainnet**?
-- Derive live `chainId` from the chosen network:
-  - testnet → `998`
-  - mainnet → `999`
-- Do not ask again if the user already gave the market type or live network in their original request.
+- Ask (or infer) whether the agent trades **crypto** or **stocks** — this sets `assetType`.
+  - Stocks agents do not require a `chainId`.
+  - **Crypto agents require a `chainId` for both paper and live modes.**
+- For crypto agents, resolve the chain:
+  - For Hyperliquid: ask **testnet** or **mainnet**?
+    - testnet → `chainId: 998`
+    - mainnet → `chainId: 999`
+  - For EVM (e.g. Ethereum, BSC, Arbitrum, Base): ask or infer the chain ID.
+- Do not ask again if the user already specified the asset type, market type, or network.
 
 ## Step 2 — Initialize session
 Call `init_trading_session` with the chosen `mode`.
@@ -82,7 +86,8 @@ If the user says something general like "EMA crossover", construct a reasonable 
 If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless they explicitly specify a different value. Set `strategy.risk_manager.leverage` accordingly.
 
 ## Step 6 — Determine initial capital
-- **Live**: `deploy_agent` auto-fetches the wallet balance as initial capital. **Do NOT ask the user for initial capital in live mode.** Do NOT call `get_hyperliquid_balance` separately — the deploy step handles it.
+- **Live on Hyperliquid (chainId 998/999)**: `deploy_agent` auto-fetches the wallet balance as initial capital. **Do NOT ask the user for initial capital.** Do NOT call `get_hyperliquid_balance` separately.
+- **Live on other networks**: `deploy_agent` cannot auto-fetch the balance. **Ask the user for their desired initial capital.**
 - **Paper**: Ask the user for their desired initial capital.
 
 ## Step 7 — Run billing preflight
@@ -176,14 +181,18 @@ Ask the user to confirm or say "Done" after funding. Do NOT proceed until they e
 
 ## Step 9 — Deploy agent
 Call `deploy_agent` with:
-- `name`, `strategy`, `mode`
-- Paper: `initialCapital`, `marketType` (spot/perp), `simulationConfig` — defaults: spot → `{"asset_type":"crypto","protocol":"uniswap","chain_id":1}`, perp → `{"asset_type":"crypto","protocol":"hyperliquid","chain_id":998}`, stocks → `{"asset_type":"stocks"}`
+- `name`, `strategy`, `mode`, `marketType`
+- `assetType`: always pass `"crypto"` or `"stocks"`
+- `chainId`: **required when `assetType` is `"crypto"`** — pass for both paper and live modes
+- `symbol`: always pass when known
 - If perp: `leverage` (same as `strategy.risk_manager.leverage`)
-- Live: chosen `marketType`, `leverage`, `walletId`, `walletAddress`, `masterWalletAddress`, `symbol`, `protocol: "hyperliquid"`, and the derived live `chainId` (do NOT pass `initialCapital` — it is auto-fetched from wallet balance)
+- Paper: `initialCapital`
+- Live: `walletAddress`, `masterWalletAddress`. For Hyperliquid (chainId 998/999), `initialCapital` is auto-fetched from the wallet balance — do NOT pass it. For other networks, pass `initialCapital` explicitly.
 
 Important:
-- Do **not** pass top-level `chainId` for paper mode.
-- Do **not** rely on a default live `chainId`; always pass the derived value from the user’s chosen network.
+- Do **not** pass `simulationConfig` — it is not in the API spec.
+- Do **not** pass `walletId` or `protocol` — not in the API spec.
+- Do **not** omit `chainId` for crypto agents, even in paper mode.
 
 Handle the response:
 - **create.ok = false**: Report error and STOP.
@@ -194,6 +203,5 @@ Handle the response:
   - next billing date estimate
   - remind the user that there should be at least `billing.result.feeBreakdown.firstBillingAmount` OSWAP in the billing wallet by `billing.result.nextBillingDateEstimate` for auto renewal
   - include any warning returned in `billing.result.warning`
-- **notify.ok = false**: Warn but continue.
-- **registerTrader.ok = false** (live): Warn that settlement registration failed — agent may not trade.
+- **log.ok = false**: Warn but continue (action log is non-critical).
 - Present: agent ID, name, pair, capital, and `create.agentUrl`.

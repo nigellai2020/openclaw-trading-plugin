@@ -17,12 +17,12 @@ If the user asks about billing subscriptions, renewal status, or next billing da
 1. If the user has not specified an agent ID, call `list_my_agents` first and ask which agent to update.
 2. Call `get_agent` if you need a quick public summary before confirming the change.
 3. Call `update_agent` with only the fields the user explicitly wants changed.
-4. If the requested change touches live runtime fields (`walletId`, `walletAddress`, `masterWalletAddress`, `symbol`, `chainId`, `protocol`, `buyLimit`) and the tool reports missing companion fields, ask the user only for the missing companion fields needed to safely rebuild the live config.
-5. Report per-backend results separately: trading-data, trading-bot, and settlement. If the tool returns warnings, surface them verbatim because some fields are only supported on a subset of backends.
+4. `chainId` can be set for both paper and live agents — it selects the network (Hyperliquid 998/999 or EVM chain ID).
+5. If the requested change touches live runtime fields (`walletId`, `walletAddress`, `masterWalletAddress`, `symbol`, `chainId`, `protocol`, `buyLimit`) and the tool reports missing companion fields, ask the user only for the missing companion fields needed to safely rebuild the live config.
+6. Report the `tradingData` result. If the tool returns `warnings`, surface them verbatim.
 
 ## Delete an agent
 1. If the user hasn't specified an agent ID, call `list_my_agents` first and ask which one to delete.
 2. Confirm with the user before deleting — show the agent name and ID.
-3. Call `delete_agent` with the `agentId`.
-4. Report results: settlement (live only), trading-data deletion, and trading-bot deletion status.
-5. If deletion partially fails, say which backend failed so the user knows whether billing cancellation or bot cleanup may still be pending.
+3. Call `delete_agent` with the `agentId`. The server handles all delegation (trading-bot and settlement) internally via `delegateToTradingBot` and `delegateToSettlement` flags.
+4. Report `tradingData.ok`. If it failed, say deletion may be incomplete.
