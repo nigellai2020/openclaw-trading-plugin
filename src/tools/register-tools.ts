@@ -4,6 +4,7 @@ import { Contract, Wallet } from "ethers";
 import {
   DEFAULT_LIVE_LEVERAGE,
   ERC20_ABI,
+  getEvmChainConfig,
   NFT_ABI,
   ROUTER_ABI,
   VAULT_ABI,
@@ -19,7 +20,7 @@ import type { EthHeaders, PreparedAgentCreationContext } from "../types/billing.
 import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
-import { deriveDefaultLiveBuyLimit, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
+import { deriveDefaultLiveBuyLimit, fetchEvmWalletBalances, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
 export default function registerTools(api: any, ctx: ToolsContext = createToolsContext(api)) {
@@ -198,6 +199,44 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             `Your wallet has 0 USDC balance. You must deposit USDC into your Hyperliquid wallet before you can trade. ` +
             `Deposit here: ${appUrl}`,
         });
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "get_evm_wallet_balance",
+    description: "Get the native token and USDC balances of an EVM wallet address for a specific EVM network (e.g. Ethereum chainId=1, BSC chainId=56). Use the master wallet address, not the agent/API wallet.",
+    parameters: Type.Object({
+      masterWalletAddress: Type.String({ description: "Master wallet address (0x...)" }),
+      chainId: Type.Number({ description: "EVM chain ID (e.g. 1=Ethereum, 56=BSC)" }),
+    }),
+    async execute(
+      _id: string,
+      params: { masterWalletAddress: string; chainId: number },
+    ) {
+      const chainConfig = getEvmChainConfig(params.chainId);
+      if (!chainConfig) {
+        return textResult({ error: `Unsupported EVM chain ID: ${params.chainId}. Supported chains: Ethereum (1), BNB Chain (56).` });
+      }
+      debugLog("get_evm_wallet_balance", "entry", { masterWalletAddress: params.masterWalletAddress, chainId: params.chainId, rpcUrl: chainConfig.rpcUrl });
+      try {
+        const balances = await fetchEvmWalletBalances(
+          params.masterWalletAddress,
+          chainConfig.rpcUrl,
+          chainConfig.usdcAddress,
+          chainConfig.usdcDecimals,
+        );
+        return textResult({
+          masterWalletAddress: params.masterWalletAddress,
+          chainId: params.chainId,
+          networkLabel: chainConfig.networkLabel,
+          nativeBalance: balances.nativeBalance,
+          nativeSymbol: chainConfig.nativeSymbol,
+          usdcBalance: balances.usdcBalance,
+          usdcAddress: chainConfig.usdcAddress,
+        });
+      } catch (e: any) {
+        return textResult({ error: e.message });
       }
     },
   });
@@ -1293,26 +1332,20 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // Auto-fetch initial capital for live mode
       let initialCapital = params.initialCapital;
       if (isLive && initialCapital == null && params.masterWalletAddress) {
-        if (params.chainId === 998 || params.chainId === 999) {
-          const balance = await fetchUsdcBalance(params.masterWalletAddress, params.chainId);
-          if (balance === 0) {
-            const appUrl = params.chainId === 999
-              ? "https://app.hyperliquid.xyz"
-              : "https://app.hyperliquid-testnet.xyz";
-            return textResult({
-              error: `Wallet ${params.masterWalletAddress} has 0 USDC balance. Deposit USDC before deploying: ${appUrl}`,
-            });
+        try {
+          const derived = await deriveDefaultLiveBuyLimit(
+            params.masterWalletAddress,
+            params.chainId ?? 998,
+          );
+          if (derived) {
+            initialCapital = derived.initialCapital;
+            debugLog("deploy_agent", "auto-fetched balance", { initialCapital, chainId: params.chainId });
           }
-          initialCapital = balance;
-          debugLog("deploy_agent", "auto-fetched balance", { initialCapital, chainId: params.chainId });
+        } catch (e: any) {
+          return textResult({ error: e.message });
         }
       }
       if (initialCapital == null) {
-        if (isLive && params.chainId != null && params.chainId !== 998 && params.chainId !== 999) {
-          return textResult({
-            error: "initialCapital is required for live mode when chainId is not Hyperliquid (998/999)",
-          });
-        }
         return textResult({ error: "initialCapital is required" });
       }
 

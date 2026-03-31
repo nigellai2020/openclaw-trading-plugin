@@ -23,6 +23,38 @@ export const DEFAULT_FALLBACK_NFT_STAKE_GAS = 300_000n;
 export const DEFAULT_FALLBACK_VAULT_DEPOSIT_GAS = 220_000n;
 export const DEFAULT_LIVE_LEVERAGE = 3;
 
+export type EvmChainConfig = {
+  chainId: number;
+  networkLabel: string;
+  rpcUrl: string;
+  nativeSymbol: string;
+  usdcAddress: string;
+  usdcDecimals: number;
+};
+
+export const EVM_CHAIN_CONFIGS: Record<number, EvmChainConfig> = {
+  1: {
+    chainId: 1,
+    networkLabel: "Ethereum",
+    rpcUrl: "https://cloudflare-eth.com",
+    nativeSymbol: "ETH",
+    usdcAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    usdcDecimals: 6,
+  },
+  56: {
+    chainId: 56,
+    networkLabel: "BNB Chain",
+    rpcUrl: "https://bsc-dataseed.binance.org/",
+    nativeSymbol: "BNB",
+    usdcAddress: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+    usdcDecimals: 18,
+  },
+};
+
+export function getEvmChainConfig(chainId: number): EvmChainConfig | undefined {
+  return EVM_CHAIN_CONFIGS[chainId];
+}
+
 export const ERC20_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
   "function allowance(address owner, address spender) view returns (uint256)",
