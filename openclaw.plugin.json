@@ -97,25 +97,9 @@
         "type": "number",
         "default": 90000
       },
-      "mqttBrokerUrl": {
+      "nostrRelayUrl": {
         "type": "string",
-        "default": "your-mqtt-broker.example.com"
-      },
-      "mqttPort": {
-        "type": "number",
-        "default": 8883
-      },
-      "mqttUsername": {
-        "type": "string",
-        "default": "your_username"
-      },
-      "mqttPassword": {
-        "type": "string",
-        "default": "your_password"
-      },
-      "mqttFillExecutionsTopic": {
-        "type": "string",
-        "default": "fill_executions"
+        "default": "wss://nos.lol"
       }
     }
   }
