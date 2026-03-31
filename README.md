@@ -41,6 +41,9 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | ------------------ | --------------------------------- |
 | `get_token_prices` | Get live prices of all tokens     |
 | `get_ohlc`         | Get OHLC candle data for a symbol |
+| `get_leaderboard`  | Get leaderboard rows with optional pagination and filters |
+| `get_leaderboard_filters` | Get leaderboard filter options for chains, pairs, modes, and market types |
+| `get_agent_trades` | Get past trades / trade history for a single agent with optional `range` (`1d`, `7d`, etc.) or explicit timestamps |
 
 ### Identity
 

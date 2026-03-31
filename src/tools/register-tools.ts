@@ -23,6 +23,35 @@ import { formatAmount } from "../utils/billing.js";
 import { deriveDefaultLiveBuyLimit, fetchEvmWalletBalances, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
+type AgentTradeRange = "12h" | "24h" | "1d" | "3d" | "7d" | "30d" | "all";
+
+const AGENT_TRADE_RANGE_MS: Record<Exclude<AgentTradeRange, "all">, number> = {
+  "12h": 12 * 60 * 60 * 1000,
+  "24h": 24 * 60 * 60 * 1000,
+  "1d": 24 * 60 * 60 * 1000,
+  "3d": 3 * 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+};
+
+function applyAgentTradeWindow(
+  qs: URLSearchParams,
+  input: { range?: AgentTradeRange; startDate?: number; endDate?: number },
+) {
+  if (input.range) {
+    if (input.range !== "all") {
+      const endDate = Date.now();
+      const startDate = endDate - AGENT_TRADE_RANGE_MS[input.range];
+      qs.set("startDate", String(startDate));
+      qs.set("endDate", String(endDate));
+    }
+    return;
+  }
+
+  if (input.startDate != null) qs.set("startDate", String(input.startDate));
+  if (input.endDate != null) qs.set("endDate", String(input.endDate));
+}
+
 export default function registerTools(api: any, ctx: ToolsContext = createToolsContext(api)) {
   const {
     pluginConfig,
@@ -150,6 +179,123 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       return textResult({ pairs: results, total: results.length });
+    },
+  });
+
+  api.registerTool({
+    name: "get_leaderboard",
+    description: "Get the trading agent leaderboard with optional pagination and filters",
+    parameters: Type.Object({
+      page: Type.Optional(Type.Number({ description: "Page number (default 1)" })),
+      pageSize: Type.Optional(Type.Number({ description: "Results per page" })),
+      query: Type.Optional(Type.String({ description: "Text search on agent name" })),
+      chain: Type.Optional(Type.Number({ description: "Chain ID filter" })),
+      pair: Type.Optional(Type.Number({ description: "Trading pair ID filter" })),
+      mode: Type.Optional(Type.Union([
+        Type.Literal("live"),
+        Type.Literal("paper"),
+      ], { description: 'Trading mode filter: "live" or "paper"' })),
+      marketType: Type.Optional(Type.Union([
+        Type.Literal("spot"),
+        Type.Literal("perp"),
+      ], { description: 'Market type filter: "spot" or "perp"' })),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        page?: number;
+        pageSize?: number;
+        query?: string;
+        chain?: number;
+        pair?: number;
+        mode?: "live" | "paper";
+        marketType?: "spot" | "perp";
+      },
+    ) {
+      const qs = new URLSearchParams();
+      if (params.page != null) qs.set("page", String(params.page));
+      if (params.pageSize != null) qs.set("pageSize", String(params.pageSize));
+      if (params.query) qs.set("query", params.query);
+      if (params.chain != null) qs.set("chain", String(params.chain));
+      if (params.pair != null) qs.set("pair", String(params.pair));
+      if (params.mode) qs.set("mode", params.mode);
+      if (params.marketType) qs.set("marketType", params.marketType);
+
+      const url = `${baseUrl}/api/leaderboard${qs.toString() ? `?${qs}` : ""}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`get_leaderboard failed: ${res.status}`);
+      return textResult(await res.json());
+    },
+  });
+
+  api.registerTool({
+    name: "get_leaderboard_filters",
+    description: "Get available leaderboard filter values for chains, pairs, modes, and market types",
+    parameters: Type.Object({}),
+    async execute() {
+      const res = await fetch(`${baseUrl}/api/leaderboard/filters`);
+      if (!res.ok) throw new Error(`get_leaderboard_filters failed: ${res.status}`);
+      return textResult(await res.json());
+    },
+  });
+
+  api.registerTool({
+    name: "get_agent_trades",
+    description: "Get past trades and trade history for a single agent, with optional pagination, type, and either a relative range like 1d/7d or explicit start/end timestamps",
+    parameters: Type.Object({
+      agentId: Type.Number({ description: "Agent ID" }),
+      type: Type.Optional(Type.Union([
+        Type.Literal("all"),
+        Type.Literal("entry"),
+        Type.Literal("exit"),
+      ], { description: 'Trade type filter: "all", "entry", or "exit"' })),
+      range: Type.Optional(Type.Union([
+        Type.Literal("12h"),
+        Type.Literal("24h"),
+        Type.Literal("1d"),
+        Type.Literal("3d"),
+        Type.Literal("7d"),
+        Type.Literal("30d"),
+        Type.Literal("all"),
+      ], {
+        description:
+          'Relative time window. Use "12h", "24h", "1d", "3d", "7d", "30d", or "all". If provided, this overrides explicit startDate/endDate.',
+      })),
+      startDate: Type.Optional(Type.Number({
+        description: "Start timestamp in Unix milliseconds or seconds. Ignored when range is provided.",
+      })),
+      endDate: Type.Optional(Type.Number({
+        description: "End timestamp in Unix milliseconds or seconds. Ignored when range is provided.",
+      })),
+      page: Type.Optional(Type.Number({ description: "Page number" })),
+      pageSize: Type.Optional(Type.Number({ description: "Results per page" })),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        agentId: number;
+        type?: "all" | "entry" | "exit";
+        range?: AgentTradeRange;
+        startDate?: number;
+        endDate?: number;
+        page?: number;
+        pageSize?: number;
+      },
+    ) {
+      const qs = new URLSearchParams();
+      if (params.type) qs.set("type", params.type);
+      applyAgentTradeWindow(qs, {
+        range: params.range,
+        startDate: params.startDate,
+        endDate: params.endDate,
+      });
+      if (params.page != null) qs.set("page", String(params.page));
+      if (params.pageSize != null) qs.set("pageSize", String(params.pageSize));
+
+      const url = `${baseUrl}/api/transactions/${params.agentId}${qs.toString() ? `?${qs}` : ""}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`get_agent_trades failed: ${res.status}`);
+      return textResult(await res.json());
     },
   });
 
