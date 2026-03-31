@@ -4,7 +4,8 @@ import * as path from "node:path";
 
 export function formatFillNotification(event: any): string {
   const { agent_name, symbol, side, is_entry, base_amount, execution_price, success } = event;
-  if (!success) return `[Trade Failed] ${agent_name}: ${symbol} ${side} failed`;
+  const isSuccess = typeof success === "boolean" ? success : true;
+  if (!isSuccess) return `[Trade Failed] ${agent_name}: ${symbol} ${side} failed`;
   const action = is_entry ? "Opened" : "Closed";
   return `[Trade] ${agent_name}: ${action} ${side} ${base_amount} ${symbol} @ $${execution_price}`;
 }
