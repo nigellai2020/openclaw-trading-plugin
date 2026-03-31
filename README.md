@@ -39,11 +39,13 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 
 | Tool               | Description                       |
 | ------------------ | --------------------------------- |
-| `get_token_prices` | Get live prices of all tokens     |
+| `get_token_prices` | Get current live token prices for all tracked tokens or a normalized symbol list |
 | `get_ohlc`         | Get OHLC candle data for a symbol |
 | `get_leaderboard`  | Get leaderboard rows with optional pagination and filters |
 | `get_leaderboard_filters` | Get leaderboard filter options for chains, pairs, modes, and market types |
 | `get_agent_trades` | Get past trades / trade history for a single agent with optional `range` (`1d`, `7d`, etc.) or explicit timestamps |
+
+`get_token_prices` accepts an optional `symbols` array. OpenClaw should normalize user input before calling it and pass uppercase base-token symbols like `ETH` or `BTC`. If malformed symbols are provided, the tool returns a validation error so OpenClaw can retry.
 
 ### Identity
 
@@ -69,7 +71,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 
 | Tool                  | Description                           |
 | --------------------- | ------------------------------------- |
-| `create_backtest`     | Submit a backtest job; if the user mentions a timezone, OpenClaw should resolve it before calling the tool, otherwise naive dates/times fall back to the OpenClaw runtime timezone, then UTC |
+| `create_backtest`     | Submit a backtest job; if the user mentions a timezone, OpenClaw should resolve it before calling the tool, otherwise naive dates/times fall back to the OpenClaw runtime timezone, then UTC. If `startTime` and/or `endTime` are omitted, the plugin defaults to a rolling 30-day window |
 | `get_backtests`       | List backtests for an agent           |
 | `get_backtest_status` | Check backtest job status (batch)     |
 | `get_backtest_job`    | Poll backtest job progress and status |
@@ -83,6 +85,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | `copy-trade`         | Guided workflow for creating live copied agents from an existing source agent |
 | `manage-agents`      | Guided workflow for listing, updating, and deleting agents |
 | `manage-wallets`     | Guided workflow for listing and deleting wallets |
+| `market-data`        | Guided workflow for current token prices and historical market data |
 | `backtest`           | Guided workflow for running backtests    |
 | `strategy-reference` | Loads the canonical trading strategy reference from `skills/strategy-reference/strategy.md` |
 | `nostr-identity`     | Retrieve user's Nostr identity           |

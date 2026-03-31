@@ -31,7 +31,7 @@ Call `init_trading_session` with the chosen `mode`.
 
 Handle the response:
 - **keys.generated = true**: Inform the user a new Nostr identity was created. Do not display the private key or nsec unless asked.
-- **If live + wallets.wallets has entries**: Filter to the chosen network first, then present the active wallets (name, walletAddress, masterWalletAddress, network). Ask which to reuse. Save the chosen `walletId`, `walletAddress`, and `masterWalletAddress`, then continue to Step 5.
+- **If live + wallets.wallets has entries**: Filter to the chosen network first, then present the active wallets (name, walletAddress, masterWalletAddress, network). Never use a markdown table. Never abbreviate `0x...` values. Show `walletAddress` and `masterWalletAddress` as full monospace lines. Ask which wallet to reuse. Save the chosen `walletId`, `walletAddress`, and `masterWalletAddress`, then continue to Step 5.
 - **If live + no wallets on the chosen network**: Continue to Step 3.
 - **If paper**: Skip to Step 5.
 
@@ -104,6 +104,7 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 ## Step 8 — Confirm before creating
 
 If `billing.required = false`, present a simple agent summary (name, pair, strategy, indicators, entry/exit rules, risk settings, initial capital, mode/network details) and ask the user to confirm.
+- Whenever this summary includes wallet data, never use a table or ellipsis. Show each wallet address as a full monospace line.
 
 If `billing.required = true`, present the full checkout page below. Follow this structure and ordering closely. Populate all fields from `prepare_agent_creation` response data.
 

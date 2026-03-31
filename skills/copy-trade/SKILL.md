@@ -35,7 +35,7 @@ Handle the response:
 ## Step 3 — Resolve the wallet on the derived or chosen network
 If `init_trading_session` returned wallets:
 - Filter to wallets on the derived network, or the user-chosen network if the source agent is paper / missing chain.
-- If wallets exist on that network, present them and ask which one to use.
+- If wallets exist on that network, present them and ask which one to use. Never use a markdown table. Never abbreviate `0x...` values. Show `walletAddress` and `masterWalletAddress` as full monospace lines.
 - Save `walletId`, `walletAddress`, and `masterWalletAddress`.
 
 If no wallet exists on the derived network:
@@ -76,6 +76,7 @@ Present a summary:
 - optional alias
 - optional order override
 - whether upfront billing setup is required
+- When showing the selected wallet or master wallet, never use a table or ellipsis. Show full monospace addresses on their own lines.
 
 Ask the user to confirm. Do not proceed until they explicitly confirm.
 

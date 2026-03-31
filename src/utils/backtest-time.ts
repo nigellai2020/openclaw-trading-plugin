@@ -10,6 +10,7 @@ const NAIVE_DATETIME_RE =
 const NUMERIC_TIMESTAMP_RE = /^\d{10,16}$/;
 const EXPLICIT_TIMEZONE_RE = /(Z|[+-]\d{2}:\d{2})$/i;
 const EXPLICIT_OFFSET_CAPTURE_RE = /(Z|[+-]\d{2}:\d{2})$/i;
+const DEFAULT_BACKTEST_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const AMBIGUOUS_TIMEZONE_ABBREVIATIONS = new Set([
   "est",
   "edt",
@@ -268,25 +269,104 @@ function normalizeBacktestTimeInput(
   );
 }
 
-export function normalizeBacktestTimeRange(
-  startInput: string | number,
-  endInput: string | number,
-  timeZoneOverride?: string,
-): BacktestNormalizedTimeRange {
-  const parsedTimeZoneOverride = resolveBacktestTimeZoneOverride(timeZoneOverride);
-  const effectiveTimeZone = parsedTimeZoneOverride ?? resolveRuntimeTimeZone();
-  const start = normalizeBacktestTimeInput(startInput, "start", effectiveTimeZone);
-  const end = normalizeBacktestTimeInput(endInput, "end", effectiveTimeZone);
+function deriveBacktestTimeFromIso(
+  iso: string,
+  offsetMs: number,
+): BacktestNormalizedTime {
+  const derivedMs = new Date(iso).getTime() + offsetMs;
+  const derivedDate = new Date(derivedMs);
+  if (Number.isNaN(derivedDate.getTime())) {
+    throw new Error(`Invalid derived backtest time from ${iso}`);
+  }
+  return {
+    iso: derivedDate.toISOString(),
+    usedExplicitOffset: false,
+  };
+}
 
-  if (new Date(start.iso).getTime() >= new Date(end.iso).getTime()) {
-    throw new Error("Invalid backtest time range: startTime must be earlier than endTime");
+function resolveNormalizedBacktestRange(
+  startInput: string | number | undefined,
+  endInput: string | number | undefined,
+  effectiveTimeZone: string,
+): {
+  start: BacktestNormalizedTime;
+  end: BacktestNormalizedTime;
+  usedExplicitInputOffset: boolean;
+  explicitOffset?: string;
+} {
+  if (startInput == null && endInput == null) {
+    const now = new Date();
+    if (Number.isNaN(now.getTime())) {
+      throw new Error("Unable to resolve the current time for the default backtest window");
+    }
+
+    return {
+      start: {
+        iso: new Date(now.getTime() - DEFAULT_BACKTEST_WINDOW_MS).toISOString(),
+        usedExplicitOffset: false,
+      },
+      end: {
+        iso: now.toISOString(),
+        usedExplicitOffset: false,
+      },
+      usedExplicitInputOffset: false,
+    };
   }
 
+  if (startInput == null) {
+    const end = normalizeBacktestTimeInput(endInput!, "end", effectiveTimeZone);
+    return {
+      start: deriveBacktestTimeFromIso(end.iso, -DEFAULT_BACKTEST_WINDOW_MS),
+      end,
+      usedExplicitInputOffset: end.usedExplicitOffset,
+      explicitOffset: end.explicitOffset,
+    };
+  }
+
+  if (endInput == null) {
+    const start = normalizeBacktestTimeInput(startInput, "start", effectiveTimeZone);
+    return {
+      start,
+      end: deriveBacktestTimeFromIso(start.iso, DEFAULT_BACKTEST_WINDOW_MS),
+      usedExplicitInputOffset: start.usedExplicitOffset,
+      explicitOffset: start.explicitOffset,
+    };
+  }
+
+  const start = normalizeBacktestTimeInput(startInput, "start", effectiveTimeZone);
+  const end = normalizeBacktestTimeInput(endInput, "end", effectiveTimeZone);
   const bothExplicitOffsets = start.usedExplicitOffset && end.usedExplicitOffset;
   const sharedExplicitOffset =
     bothExplicitOffsets && start.explicitOffset === end.explicitOffset
       ? start.explicitOffset
       : undefined;
+
+  return {
+    start,
+    end,
+    usedExplicitInputOffset: bothExplicitOffsets,
+    explicitOffset: sharedExplicitOffset,
+  };
+}
+
+export function normalizeBacktestTimeRange(
+  startInput?: string | number,
+  endInput?: string | number,
+  timeZoneOverride?: string,
+): BacktestNormalizedTimeRange {
+  const parsedTimeZoneOverride = resolveBacktestTimeZoneOverride(timeZoneOverride);
+  const effectiveTimeZone = parsedTimeZoneOverride ?? resolveRuntimeTimeZone();
+  const {
+    start,
+    end,
+    usedExplicitInputOffset,
+    explicitOffset,
+  } = resolveNormalizedBacktestRange(startInput, endInput, effectiveTimeZone);
+
+  if (new Date(start.iso).getTime() >= new Date(end.iso).getTime()) {
+    throw new Error("Invalid backtest time range: startTime must be earlier than endTime");
+  }
+
   const usesExplicitTimeZoneParameter = Boolean(parsedTimeZoneOverride);
 
   return {
@@ -294,12 +374,12 @@ export function normalizeBacktestTimeRange(
     endTime: end.iso,
     timeZoneUsed: usesExplicitTimeZoneParameter
       ? parsedTimeZoneOverride!
-      : bothExplicitOffsets
-        ? sharedExplicitOffset ?? "explicit-input-offset"
+      : usedExplicitInputOffset
+        ? explicitOffset ?? "explicit-input-offset"
         : effectiveTimeZone,
     timeZoneSource: usesExplicitTimeZoneParameter
       ? "explicit-timezone-parameter"
-      : bothExplicitOffsets
+      : usedExplicitInputOffset
         ? "explicit-input-offset"
         : "runtime-timezone",
   };

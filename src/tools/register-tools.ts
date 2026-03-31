@@ -24,6 +24,11 @@ import { deriveDefaultLiveBuyLimit, fetchEvmWalletBalances, fetchUsdcBalance, te
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
 type AgentTradeRange = "12h" | "24h" | "1d" | "3d" | "7d" | "30d" | "all";
+type TokenPriceValidationIssue = {
+  index: number;
+  symbol: string;
+  reason: string;
+};
 
 const AGENT_TRADE_RANGE_MS: Record<Exclude<AgentTradeRange, "all">, number> = {
   "12h": 12 * 60 * 60 * 1000,
@@ -50,6 +55,41 @@ function applyAgentTradeWindow(
 
   if (input.startDate != null) qs.set("startDate", String(input.startDate));
   if (input.endDate != null) qs.set("endDate", String(input.endDate));
+}
+
+const TOKEN_PRICE_SYMBOL_RE = /^[A-Z0-9][A-Z0-9._-]*$/;
+
+function validateRequestedTokenSymbols(symbols?: string[]): TokenPriceValidationIssue[] {
+  if (!symbols) return [];
+  if (symbols.length === 0) {
+    return [{
+      index: 0,
+      symbol: "",
+      reason: "symbols must be omitted to request all tracked token prices; do not pass an empty array",
+    }];
+  }
+
+  return symbols.flatMap((symbol, index) => {
+    if (symbol.length === 0) {
+      return [{ index, symbol, reason: "symbol is empty" }];
+    }
+    if (symbol.trim() !== symbol) {
+      return [{ index, symbol, reason: "symbol has leading or trailing whitespace" }];
+    }
+    if (/\s/.test(symbol)) {
+      return [{ index, symbol, reason: "symbol must not contain whitespace" }];
+    }
+    if (symbol.includes("/")) {
+      return [{ index, symbol, reason: 'symbol must be a base token like "ETH", not a pair like "ETH/USDC"' }];
+    }
+    if (symbol.toUpperCase() !== symbol) {
+      return [{ index, symbol, reason: "symbol must be uppercase" }];
+    }
+    if (!TOKEN_PRICE_SYMBOL_RE.test(symbol)) {
+      return [{ index, symbol, reason: "symbol must contain only A-Z, 0-9, ., _, or -" }];
+    }
+    return [];
+  });
 }
 
 export default function registerTools(api: any, ctx: ToolsContext = createToolsContext(api)) {
@@ -94,12 +134,75 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "get_token_prices",
-    description: "Get current live prices of all tokens",
-    parameters: Type.Object({}),
-    async execute() {
+    description:
+      "Get current live token prices from the API. " +
+      "Use this for current/latest/live price questions. " +
+      "OpenClaw must normalize user input before calling this tool. " +
+      'When `symbols` is provided, pass uppercase base-token symbols only, like "ETH" or "BTC". ' +
+      'Pair forms like "ETH/USDC", lowercase entries, or whitespace-padded values are rejected so OpenClaw can retry.',
+    parameters: Type.Object({
+      symbols: Type.Optional(
+        Type.Array(
+          Type.String({
+            description:
+              'Optional uppercase base-token symbols only, for example ["ETH", "BTC"]. ' +
+              'OpenClaw must normalize user input before calling. Omit `symbols` to fetch all tracked token prices.',
+          }),
+        ),
+      ),
+    }),
+    async execute(_id: string, params: { symbols?: string[] }) {
+      const invalidSymbols = validateRequestedTokenSymbols(params.symbols);
+      if (invalidSymbols.length > 0) {
+        return textResult({
+          success: false,
+          error: "Invalid symbol format. OpenClaw must retry with normalized uppercase base-token symbols.",
+          invalidSymbols,
+          retryable: true,
+          retryInstruction:
+            'Retry `get_token_prices` with symbols like ["ETH"] or ["BTC","SOL"]. Do not pass pairs, lowercase symbols, or whitespace-padded values.',
+        });
+      }
+
       const res = await fetch(`${baseUrl}/api/token-prices`);
-      if (!res.ok) throw new Error(`token-prices failed: ${res.status}`);
-      return textResult(await res.json());
+      const body = await parseResponseBody(res);
+      if (!res.ok) throw new Error(`token-prices failed: ${res.status} ${responseErrorMessage(body)}`);
+
+      const rows = Array.isArray(body?.data) ? body.data : [];
+      const baseResult: Record<string, unknown> =
+        typeof body === "object" && body !== null
+          ? { ...(body as Record<string, unknown>) }
+          : { data: rows };
+
+      if (!params.symbols) {
+        return textResult({
+          ...baseResult,
+          data: rows,
+          source: "/api/token-prices",
+        });
+      }
+
+      const rowBySymbol = new Map<string, any>();
+      for (const row of rows) {
+        if (typeof row?.symbol === "string" && !rowBySymbol.has(row.symbol)) {
+          rowBySymbol.set(row.symbol, row);
+        }
+      }
+
+      const data = params.symbols.flatMap((symbol) => {
+        const row = rowBySymbol.get(symbol);
+        return row ? [row] : [];
+      });
+      const unavailableSymbols = params.symbols.filter((symbol) => !rowBySymbol.has(symbol));
+
+      return textResult({
+        ...baseResult,
+        success: typeof baseResult.success === "boolean" ? baseResult.success : true,
+        requestedSymbols: params.symbols,
+        data,
+        unavailableSymbols,
+        source: "/api/token-prices",
+      });
     },
   });
 
@@ -2533,30 +2636,33 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "create_backtest",
-    description: "Create a new backtest job for an agent",
+    description:
+      "Create a new backtest job for an agent. " +
+      "If the user mentions a timezone, OpenClaw should resolve it before calling the tool. " +
+      "If `startTime` and/or `endTime` are omitted, the plugin defaults to a rolling 30-day window.",
     parameters: Type.Object({
       agentId: Type.Number({ description: "Agent ID to backtest" }),
       initialCapital: Type.Number({ description: "Initial capital amount" }),
-      startTime: Type.Union([
+      startTime: Type.Optional(Type.Union([
         Type.String({
           description:
-            "Start time (ISO datetime, date-only YYYY-MM-DD, or unix timestamp). If the user mentions a timezone, OpenClaw should resolve it into an ISO datetime with explicit offset before calling this tool. Otherwise naive inputs use the OpenClaw runtime timezone.",
+            "Optional start time (ISO datetime, date-only YYYY-MM-DD, or unix timestamp). If omitted, the plugin derives it from `endTime` or defaults to a rolling 30-day window.",
         }),
         Type.Number({
           description:
-            "Start unix timestamp in seconds or milliseconds.",
+            "Optional start unix timestamp in seconds or milliseconds.",
         }),
-      ]),
-      endTime: Type.Union([
+      ])),
+      endTime: Type.Optional(Type.Union([
         Type.String({
           description:
-            "End time (ISO datetime, date-only YYYY-MM-DD, or unix timestamp). Date-only end dates include the full final local day. If the user mentions a timezone, OpenClaw should resolve it into an ISO datetime with explicit offset before calling this tool. Otherwise naive inputs use the OpenClaw runtime timezone.",
+            "Optional end time (ISO datetime, date-only YYYY-MM-DD, or unix timestamp). Date-only end dates include the full final local day. If omitted, the plugin derives it from `startTime` or defaults to a rolling 30-day window.",
         }),
         Type.Number({
           description:
-            "End unix timestamp in seconds or milliseconds.",
+            "Optional end unix timestamp in seconds or milliseconds.",
         }),
-      ]),
+      ])),
       timeZone: Type.Optional(
         Type.String({
           description:
@@ -2572,8 +2678,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       params: {
         agentId: number;
         initialCapital: number;
-        startTime: string | number;
-        endTime: string | number;
+        startTime?: string | number;
+        endTime?: string | number;
         timeZone?: string;
         protocolFee?: number;
         gasFee?: number;
@@ -2624,9 +2730,40 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         },
         body: JSON.stringify(payload),
       });
-      if (!res.ok)
-        throw new Error(`create_backtest failed: ${res.status} ${await res.text()}`);
-      return textResult(await res.json());
+      const body = await parseResponseBody(res);
+      if (!res.ok) {
+        throw new Error(`create_backtest failed: ${res.status} ${responseErrorMessage(body)}`);
+      }
+
+      const responseBody =
+        typeof body === "object" && body !== null
+          ? { ...(body as Record<string, unknown>) }
+          : {};
+      const jobId =
+        typeof responseBody.jobId === "string"
+          ? responseBody.jobId
+          : typeof responseBody.job_id === "string"
+            ? responseBody.job_id
+            : typeof responseBody.data === "object" &&
+                responseBody.data !== null &&
+                typeof (responseBody.data as Record<string, unknown>).jobId === "string"
+              ? (responseBody.data as Record<string, unknown>).jobId
+              : typeof responseBody.data === "object" &&
+                  responseBody.data !== null &&
+                  typeof (responseBody.data as Record<string, unknown>).job_id === "string"
+                ? (responseBody.data as Record<string, unknown>).job_id
+                : null;
+
+      if (!jobId) {
+        throw new Error("create_backtest succeeded but response did not include a jobId");
+      }
+
+      return textResult({
+        ...responseBody,
+        jobId,
+        status: "submitted",
+        message: `Backtest job ${jobId} submitted.`,
+      });
     },
   });
 
