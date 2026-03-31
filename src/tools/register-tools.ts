@@ -19,7 +19,7 @@ import type { EthHeaders, PreparedAgentCreationContext } from "../types/billing.
 import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
-import { deriveDefaultLiveBuyLimit, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
+import { deriveDefaultLiveBuyLimit, fetchEvmWalletBalances, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
 export default function registerTools(api: any, ctx: ToolsContext = createToolsContext(api)) {
@@ -198,6 +198,35 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             `Your wallet has 0 USDC balance. You must deposit USDC into your Hyperliquid wallet before you can trade. ` +
             `Deposit here: ${appUrl}`,
         });
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "get_evm_wallet_balance",
+    description: "Get the native token (e.g. BNB) and USDC balances of an EVM wallet address (e.g. BSC). Uses the configured EVM RPC and USDC contract address. Use the master wallet address, not the agent/API wallet.",
+    parameters: Type.Object({
+      masterWalletAddress: Type.String({ description: "Master wallet address (0x...)" }),
+    }),
+    async execute(
+      _id: string,
+      params: { masterWalletAddress: string },
+    ) {
+      const rpcUrl = billingEvmConfig.rpcUrl;
+      const usdcAddress = billingEvmConfig.evmUsdcAddress;
+      const usdcDecimals = billingEvmConfig.evmUsdcDecimals;
+      debugLog("get_evm_wallet_balance", "entry", { masterWalletAddress: params.masterWalletAddress, rpcUrl, usdcAddress });
+      try {
+        const balances = await fetchEvmWalletBalances(params.masterWalletAddress, rpcUrl, usdcAddress, usdcDecimals);
+        return textResult({
+          masterWalletAddress: params.masterWalletAddress,
+          nativeBalance: balances.nativeBalance,
+          usdcBalance: balances.usdcBalance,
+          usdcAddress: usdcAddress ?? null,
+          networkLabel: billingEvmConfig.networkLabel,
+        });
+      } catch (e: any) {
+        return textResult({ error: e.message });
       }
     },
   });
@@ -1166,6 +1195,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
               walletDerivedBuyLimit = await deriveDefaultLiveBuyLimit(
                 resolvedMasterWalletAddress,
                 resolvedPreviewChainId,
+                { rpcUrl: billingEvmConfig.rpcUrl, usdcAddress: billingEvmConfig.evmUsdcAddress, usdcDecimals: billingEvmConfig.evmUsdcDecimals },
               );
             } catch (e: any) {
               return textResult({
@@ -1305,14 +1335,28 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           }
           initialCapital = balance;
           debugLog("deploy_agent", "auto-fetched balance", { initialCapital, chainId: params.chainId });
+        } else {
+          try {
+            const balances = await fetchEvmWalletBalances(
+              params.masterWalletAddress,
+              billingEvmConfig.rpcUrl,
+              billingEvmConfig.evmUsdcAddress,
+              billingEvmConfig.evmUsdcDecimals,
+            );
+            const tokenLabel = billingEvmConfig.evmUsdcAddress ? "USDC" : "native token";
+            if ((billingEvmConfig.evmUsdcAddress ? balances.usdcBalance : balances.nativeBalance) === 0) {
+              return textResult({
+                error: `Wallet ${params.masterWalletAddress} has 0 ${tokenLabel} balance on ${billingEvmConfig.networkLabel}. Deposit ${tokenLabel} before deploying a live agent.`,
+              });
+            }
+            initialCapital = billingEvmConfig.evmUsdcAddress ? balances.usdcBalance : balances.nativeBalance;
+            debugLog("deploy_agent", "auto-fetched evm balance", { initialCapital, chainId: params.chainId, nativeBalance: balances.nativeBalance, usdcBalance: balances.usdcBalance });
+          } catch (e: any) {
+            return textResult({ error: `Failed to fetch EVM wallet balance: ${e.message}` });
+          }
         }
       }
       if (initialCapital == null) {
-        if (isLive && params.chainId != null && params.chainId !== 998 && params.chainId !== 999) {
-          return textResult({
-            error: "initialCapital is required for live mode when chainId is not Hyperliquid (998/999)",
-          });
-        }
         return textResult({ error: "initialCapital is required" });
       }
 
@@ -1826,6 +1870,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         derivedDefaultBuyLimit = await deriveDefaultLiveBuyLimit(
           resolvedMasterWalletAddress,
           resolvedChainId,
+          { rpcUrl: billingEvmConfig.rpcUrl, usdcAddress: billingEvmConfig.evmUsdcAddress, usdcDecimals: billingEvmConfig.evmUsdcDecimals },
         );
       } catch (e: any) {
         result.error = e.message;

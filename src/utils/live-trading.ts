@@ -1,4 +1,5 @@
-import { DEFAULT_LIVE_LEVERAGE } from "../constants/trading.js";
+import { Contract, formatUnits, JsonRpcProvider } from "ethers";
+import { DEFAULT_LIVE_LEVERAGE, ERC20_ABI } from "../constants/trading.js";
 
 export function textResult(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
@@ -41,26 +42,98 @@ export async function fetchUsdcBalance(masterWalletAddress: string, chainId: num
   return balance;
 }
 
+export async function fetchEvmNativeBalance(address: string, rpcUrl: string): Promise<number> {
+  const provider = new JsonRpcProvider(rpcUrl);
+  const raw = await provider.getBalance(address);
+  return parseFloat(formatUnits(raw, 18));
+}
+
+export async function fetchEvmUsdcBalance(
+  address: string,
+  rpcUrl: string,
+  usdcAddress: string,
+  usdcDecimals = 18,
+): Promise<number> {
+  const provider = new JsonRpcProvider(rpcUrl);
+  const contract = new Contract(usdcAddress, ERC20_ABI, provider);
+  const raw = await contract.balanceOf(address);
+  return parseFloat(formatUnits(raw, usdcDecimals));
+}
+
+export type EvmWalletBalances = {
+  nativeBalance: number;
+  usdcBalance: number;
+};
+
+export async function fetchEvmWalletBalances(
+  address: string,
+  rpcUrl: string,
+  usdcAddress?: string,
+  usdcDecimals = 18,
+): Promise<EvmWalletBalances> {
+  const provider = new JsonRpcProvider(rpcUrl);
+  const nativeRaw = await provider.getBalance(address);
+  const nativeBalance = parseFloat(formatUnits(nativeRaw, 18));
+
+  let usdcBalance = 0;
+  if (usdcAddress) {
+    const contract = new Contract(usdcAddress, ERC20_ABI, provider);
+    const usdcRaw = await contract.balanceOf(address);
+    usdcBalance = parseFloat(formatUnits(usdcRaw, usdcDecimals));
+  }
+
+  return { nativeBalance, usdcBalance };
+}
+
+export type EvmConfig = {
+  rpcUrl: string;
+  usdcAddress?: string;
+  usdcDecimals?: number;
+};
+
 export async function deriveDefaultLiveBuyLimit(
   masterWalletAddress: string,
   chainId: number,
+  evmConfig?: EvmConfig,
   leverage = DEFAULT_LIVE_LEVERAGE,
 ): Promise<{ initialCapital: number; leverage: number; buyLimit: number } | null> {
-  if (chainId !== 998 && chainId !== 999) {
-    return null;
+  if (chainId === 998 || chainId === 999) {
+    const initialCapital = await fetchUsdcBalance(masterWalletAddress, chainId);
+    if (initialCapital === 0) {
+      const appUrl = chainId === 999
+        ? "https://app.hyperliquid.xyz"
+        : "https://app.hyperliquid-testnet.xyz";
+      throw new Error(
+        `Wallet ${masterWalletAddress} has 0 USDC balance. Deposit USDC before deploying: ${appUrl}`,
+      );
+    }
+    return {
+      initialCapital,
+      leverage,
+      buyLimit: initialCapital * leverage,
+    };
   }
-  const initialCapital = await fetchUsdcBalance(masterWalletAddress, chainId);
-  if (initialCapital === 0) {
-    const appUrl = chainId === 999
-      ? "https://app.hyperliquid.xyz"
-      : "https://app.hyperliquid-testnet.xyz";
-    throw new Error(
-      `Wallet ${masterWalletAddress} has 0 USDC balance. Deposit USDC before deploying: ${appUrl}`,
+
+  if (evmConfig) {
+    const balances = await fetchEvmWalletBalances(
+      masterWalletAddress,
+      evmConfig.rpcUrl,
+      evmConfig.usdcAddress,
+      evmConfig.usdcDecimals,
     );
+    const initialCapital = evmConfig.usdcAddress ? balances.usdcBalance : balances.nativeBalance;
+    if (initialCapital === 0) {
+      const tokenLabel = evmConfig.usdcAddress ? "USDC" : "native token";
+      throw new Error(
+        `Wallet ${masterWalletAddress} has 0 ${tokenLabel} balance. Deposit ${tokenLabel} before deploying.`,
+      );
+    }
+    return {
+      initialCapital,
+      leverage,
+      buyLimit: initialCapital * leverage,
+    };
   }
-  return {
-    initialCapital,
-    leverage,
-    buyLimit: initialCapital * leverage,
-  };
+
+  return null;
 }
