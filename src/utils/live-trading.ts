@@ -1,5 +1,5 @@
 import { Contract, formatUnits, JsonRpcProvider } from "ethers";
-import { DEFAULT_LIVE_LEVERAGE, ERC20_ABI } from "../constants/trading.js";
+import { DEFAULT_LIVE_LEVERAGE, ERC20_ABI, getEvmChainConfig } from "../constants/trading.js";
 
 export function textResult(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
@@ -85,16 +85,9 @@ export async function fetchEvmWalletBalances(
   return { nativeBalance, usdcBalance };
 }
 
-export type EvmConfig = {
-  rpcUrl: string;
-  usdcAddress?: string;
-  usdcDecimals?: number;
-};
-
 export async function deriveDefaultLiveBuyLimit(
   masterWalletAddress: string,
   chainId: number,
-  evmConfig?: EvmConfig,
   leverage = DEFAULT_LIVE_LEVERAGE,
 ): Promise<{ initialCapital: number; leverage: number; buyLimit: number } | null> {
   if (chainId === 998 || chainId === 999) {
@@ -114,18 +107,18 @@ export async function deriveDefaultLiveBuyLimit(
     };
   }
 
-  if (evmConfig) {
+  const chainConfig = getEvmChainConfig(chainId);
+  if (chainConfig) {
     const balances = await fetchEvmWalletBalances(
       masterWalletAddress,
-      evmConfig.rpcUrl,
-      evmConfig.usdcAddress,
-      evmConfig.usdcDecimals,
+      chainConfig.rpcUrl,
+      chainConfig.usdcAddress,
+      chainConfig.usdcDecimals,
     );
-    const initialCapital = evmConfig.usdcAddress ? balances.usdcBalance : balances.nativeBalance;
+    const initialCapital = balances.usdcBalance;
     if (initialCapital === 0) {
-      const tokenLabel = evmConfig.usdcAddress ? "USDC" : "native token";
       throw new Error(
-        `Wallet ${masterWalletAddress} has 0 ${tokenLabel} balance. Deposit ${tokenLabel} before deploying.`,
+        `Wallet ${masterWalletAddress} has 0 USDC balance on ${chainConfig.networkLabel}. Deposit USDC before deploying.`,
       );
     }
     return {

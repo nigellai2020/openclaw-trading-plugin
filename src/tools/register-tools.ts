@@ -4,6 +4,7 @@ import { Contract, Wallet } from "ethers";
 import {
   DEFAULT_LIVE_LEVERAGE,
   ERC20_ABI,
+  getEvmChainConfig,
   NFT_ABI,
   ROUTER_ABI,
   VAULT_ABI,
@@ -204,26 +205,35 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "get_evm_wallet_balance",
-    description: "Get the native token (e.g. BNB) and USDC balances of an EVM wallet address (e.g. BSC). Uses the configured EVM RPC and USDC contract address. Use the master wallet address, not the agent/API wallet.",
+    description: "Get the native token and USDC balances of an EVM wallet address for a specific EVM network (e.g. Ethereum chainId=1, BSC chainId=56). Use the master wallet address, not the agent/API wallet.",
     parameters: Type.Object({
       masterWalletAddress: Type.String({ description: "Master wallet address (0x...)" }),
+      chainId: Type.Number({ description: "EVM chain ID (e.g. 1=Ethereum, 56=BSC)" }),
     }),
     async execute(
       _id: string,
-      params: { masterWalletAddress: string },
+      params: { masterWalletAddress: string; chainId: number },
     ) {
-      const rpcUrl = billingEvmConfig.rpcUrl;
-      const usdcAddress = billingEvmConfig.evmUsdcAddress;
-      const usdcDecimals = billingEvmConfig.evmUsdcDecimals;
-      debugLog("get_evm_wallet_balance", "entry", { masterWalletAddress: params.masterWalletAddress, rpcUrl, usdcAddress });
+      const chainConfig = getEvmChainConfig(params.chainId);
+      if (!chainConfig) {
+        return textResult({ error: `Unsupported EVM chain ID: ${params.chainId}. Supported chains: Ethereum (1), BNB Chain (56).` });
+      }
+      debugLog("get_evm_wallet_balance", "entry", { masterWalletAddress: params.masterWalletAddress, chainId: params.chainId, rpcUrl: chainConfig.rpcUrl });
       try {
-        const balances = await fetchEvmWalletBalances(params.masterWalletAddress, rpcUrl, usdcAddress, usdcDecimals);
+        const balances = await fetchEvmWalletBalances(
+          params.masterWalletAddress,
+          chainConfig.rpcUrl,
+          chainConfig.usdcAddress,
+          chainConfig.usdcDecimals,
+        );
         return textResult({
           masterWalletAddress: params.masterWalletAddress,
+          chainId: params.chainId,
+          networkLabel: chainConfig.networkLabel,
           nativeBalance: balances.nativeBalance,
+          nativeSymbol: chainConfig.nativeSymbol,
           usdcBalance: balances.usdcBalance,
-          usdcAddress: usdcAddress ?? null,
-          networkLabel: billingEvmConfig.networkLabel,
+          usdcAddress: chainConfig.usdcAddress,
         });
       } catch (e: any) {
         return textResult({ error: e.message });
@@ -1195,7 +1205,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
               walletDerivedBuyLimit = await deriveDefaultLiveBuyLimit(
                 resolvedMasterWalletAddress,
                 resolvedPreviewChainId,
-                { rpcUrl: billingEvmConfig.rpcUrl, usdcAddress: billingEvmConfig.evmUsdcAddress, usdcDecimals: billingEvmConfig.evmUsdcDecimals },
               );
             } catch (e: any) {
               return textResult({
@@ -1323,37 +1332,17 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // Auto-fetch initial capital for live mode
       let initialCapital = params.initialCapital;
       if (isLive && initialCapital == null && params.masterWalletAddress) {
-        if (params.chainId === 998 || params.chainId === 999) {
-          const balance = await fetchUsdcBalance(params.masterWalletAddress, params.chainId);
-          if (balance === 0) {
-            const appUrl = params.chainId === 999
-              ? "https://app.hyperliquid.xyz"
-              : "https://app.hyperliquid-testnet.xyz";
-            return textResult({
-              error: `Wallet ${params.masterWalletAddress} has 0 USDC balance. Deposit USDC before deploying: ${appUrl}`,
-            });
+        try {
+          const derived = await deriveDefaultLiveBuyLimit(
+            params.masterWalletAddress,
+            params.chainId ?? 998,
+          );
+          if (derived) {
+            initialCapital = derived.initialCapital;
+            debugLog("deploy_agent", "auto-fetched balance", { initialCapital, chainId: params.chainId });
           }
-          initialCapital = balance;
-          debugLog("deploy_agent", "auto-fetched balance", { initialCapital, chainId: params.chainId });
-        } else {
-          try {
-            const balances = await fetchEvmWalletBalances(
-              params.masterWalletAddress,
-              billingEvmConfig.rpcUrl,
-              billingEvmConfig.evmUsdcAddress,
-              billingEvmConfig.evmUsdcDecimals,
-            );
-            const tokenLabel = billingEvmConfig.evmUsdcAddress ? "USDC" : "native token";
-            if ((billingEvmConfig.evmUsdcAddress ? balances.usdcBalance : balances.nativeBalance) === 0) {
-              return textResult({
-                error: `Wallet ${params.masterWalletAddress} has 0 ${tokenLabel} balance on ${billingEvmConfig.networkLabel}. Deposit ${tokenLabel} before deploying a live agent.`,
-              });
-            }
-            initialCapital = billingEvmConfig.evmUsdcAddress ? balances.usdcBalance : balances.nativeBalance;
-            debugLog("deploy_agent", "auto-fetched evm balance", { initialCapital, chainId: params.chainId, nativeBalance: balances.nativeBalance, usdcBalance: balances.usdcBalance });
-          } catch (e: any) {
-            return textResult({ error: `Failed to fetch EVM wallet balance: ${e.message}` });
-          }
+        } catch (e: any) {
+          return textResult({ error: e.message });
         }
       }
       if (initialCapital == null) {
@@ -1870,7 +1859,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         derivedDefaultBuyLimit = await deriveDefaultLiveBuyLimit(
           resolvedMasterWalletAddress,
           resolvedChainId,
-          { rpcUrl: billingEvmConfig.rpcUrl, usdcAddress: billingEvmConfig.evmUsdcAddress, usdcDecimals: billingEvmConfig.evmUsdcDecimals },
         );
       } catch (e: any) {
         result.error = e.message;

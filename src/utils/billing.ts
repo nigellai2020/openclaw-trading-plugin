@@ -14,7 +14,6 @@ import {
   DEFAULT_ELIGIBLE_NFT_NAME,
   DEFAULT_ELIGIBLE_NFT_PROTOCOL_FEE,
   DEFAULT_ELIGIBLE_NFT_TOTAL_MINTING_FEE,
-  DEFAULT_EVM_USDC_DECIMALS,
   DEFAULT_OSWAP_TOKEN_ADDRESS,
 } from "../constants/trading.js";
 import type { BillingEvmConfig, GasEstimateSummary } from "../types/billing.js";
@@ -90,8 +89,6 @@ export function buildBillingEvmConfig(pluginConfig: any): BillingEvmConfig {
     swapSlippageBps: pluginConfig.billingSwapSlippageBps ?? DEFAULT_BILLING_SWAP_SLIPPAGE_BPS,
     balancePollIntervalMs: pluginConfig.billingPollIntervalMs ?? DEFAULT_BILLING_POLL_INTERVAL_MS,
     balancePollTimeoutMs: pluginConfig.billingPollTimeoutMs ?? DEFAULT_BILLING_POLL_TIMEOUT_MS,
-    evmUsdcAddress: pluginConfig.evmUsdcAddress ?? undefined,
-    evmUsdcDecimals: pluginConfig.evmUsdcDecimals ?? DEFAULT_EVM_USDC_DECIMALS,
   };
 }
 

@@ -20,8 +20,6 @@ export type BillingEvmConfig = {
   swapSlippageBps: number;
   balancePollIntervalMs: number;
   balancePollTimeoutMs: number;
-  evmUsdcAddress?: string;
-  evmUsdcDecimals: number;
 };
 
 export type EthHeaders = {
