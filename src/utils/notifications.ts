@@ -3,11 +3,33 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 export function formatFillNotification(event: any): string {
-  const { agent_name, symbol, side, is_entry, base_amount, execution_price, success } = event;
+  if (typeof event?.message === "string" && event.message.trim()) {
+    return event.message.trim();
+  }
+
+  const {
+    agent_id,
+    agent_name,
+    symbol,
+    side,
+    is_entry,
+    base_amount,
+    execution_price,
+    success,
+  } = event;
+  const agentDisplayName = agent_name || "Unknown Agent";
+  const agentLabel = typeof agent_id === "number"
+    ? `${agentDisplayName} (ID: ${agent_id})`
+    : agentDisplayName;
   const isSuccess = typeof success === "boolean" ? success : true;
-  if (!isSuccess) return `[Trade Failed] ${agent_name}: ${symbol} ${side} failed`;
+  if (!isSuccess) {
+    return `[Trade Failed] Agent ${agentLabel}: ${String(symbol ?? "Unknown Symbol").toUpperCase()} ${String(side ?? "UNKNOWN").toUpperCase()} execution failed`;
+  }
+
   const action = is_entry ? "Opened" : "Closed";
-  return `[Trade] ${agent_name}: ${action} ${side} ${base_amount} ${symbol} @ $${execution_price}`;
+  const sideLabel = String(side ?? "UNKNOWN").toUpperCase();
+  const symbolLabel = String(symbol ?? "Unknown Symbol").toUpperCase();
+  return `[Trade Executed] Agent ${agentLabel}: ${action} ${sideLabel} ${base_amount} ${symbolLabel} @ $${execution_price}`;
 }
 
 function readOpenClawConfig(): { botToken: string | null; chatId: string | null } {
