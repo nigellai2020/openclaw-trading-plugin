@@ -14,13 +14,13 @@ import {
   type ToolsContext,
 } from "../context/create-tools-context.js";
 import { CopyTradeOrderConfig, SimulationConfig, SimulationConfigPatch, Strategy } from "../schemas/strategy.js";
-import { SUPPORTED_PAIRS } from "../supported-pairs.js";
 import { registerFillNotifications } from "./register-fill-notifications.js";
 import type { EthHeaders, PreparedAgentCreationContext } from "../types/billing.js";
 import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
 import { deriveDefaultLiveBuyLimit, fetchEvmWalletBalances, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
+import { fetchSupportedPairsFromApi } from "../utils/supported-pairs.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
 type AgentTradeRange = "12h" | "24h" | "1d" | "3d" | "7d" | "30d" | "all";
@@ -266,7 +266,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       _id: string,
       params: { assetType?: string; protocol?: string },
     ) {
-      let results = SUPPORTED_PAIRS;
+      let results = await fetchSupportedPairsFromApi(baseUrl);
 
       if (params.assetType) {
         results = results.filter((p) => p.asset_type === params.assetType);
