@@ -19,7 +19,6 @@ import {
   ROUTER_ABI,
   VAULT_ABI,
 } from "../constants/trading.js";
-import { SUPPORTED_PAIRS } from "../supported-pairs.js";
 import type {
   BillingEvmConfig,
   EligibleNftConfig,
@@ -119,7 +118,7 @@ export function createToolsContext(api: any) {
 
   function inferAssetTypeFromSymbol(symbol?: string): "crypto" | "stocks" | undefined {
     if (!symbol) return undefined;
-    return SUPPORTED_PAIRS.find((pair) => pair.symbol === symbol)?.asset_type;
+    return symbol.includes("/") ? "crypto" : "stocks";
   }
 
   function normalizeSimulationProtocol(protocol?: string): string | undefined {
