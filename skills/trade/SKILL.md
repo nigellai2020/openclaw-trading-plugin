@@ -103,7 +103,7 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 
 ## Step 8 — Confirm before creating
 
-If `billing.required = false`, present a simple agent summary (name, pair, strategy, indicators, entry/exit rules, risk settings, initial capital, mode/network details) and ask the user to confirm.
+If `billing.required = false`, present a simple agent summary (name, pair, strategy, indicators, entry/exit rules with order size, risk settings, initial capital, mode/network details) and ask the user to confirm.
 - Whenever this summary includes wallet data, never use a table or ellipsis. Show each wallet address as a full monospace line.
 
 If `billing.required = true`, present the full checkout page below. Follow this structure and ordering closely. Populate all fields from `prepare_agent_creation` response data.
@@ -128,8 +128,8 @@ Please review your agent before funding your wallet.
 *{strategy name}*
 
 - {indicator summary, e.g. "EMA 20 (M15) + EMA 50 (M15)"}
-- {entry rule, e.g. "Buy when EMA 20 crosses above EMA 50"}
-- {exit rule, e.g. "Close when EMA 20 crosses below EMA 50"}
+- {entry rule with order size, e.g. "Buy when EMA 20 crosses above EMA 50 (Order size: 100% of capital)"}
+- {exit rule with order size, e.g. "Close when EMA 20 crosses below EMA 50 (Order size: 100% of position)"}
 - Stop-loss: {stop loss %}
 - Take-profit: {take profit %}
 - Cooldown: {cooldown}s
