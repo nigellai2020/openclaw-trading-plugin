@@ -19,8 +19,14 @@ function readOpenClawConfig(): { botToken: string | null; chatId: string | null 
     botToken = config.channels?.telegram?.botToken ?? null;
   } catch {}
   try {
-    const allowFrom = JSON.parse(fs.readFileSync(path.join(openclawDir, "credentials", "telegram-allowFrom.json"), "utf8"));
-    chatId = allowFrom.allowFrom?.[0] ?? null;
+    const credentialsDir = path.join(openclawDir, "credentials");
+    const credFiles = fs.readdirSync(credentialsDir);
+    const allowFromFile = credFiles.find(f => f === "telegram-allowFrom.json") ??
+      credFiles.find(f => /^telegram-.+-allowFrom\.json$/.test(f));
+    if (allowFromFile) {
+      const allowFrom = JSON.parse(fs.readFileSync(path.join(credentialsDir, allowFromFile), "utf8"));
+      chatId = allowFrom.allowFrom?.[0] ?? null;
+    }
   } catch {}
   return { botToken, chatId };
 }

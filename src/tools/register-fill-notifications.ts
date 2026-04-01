@@ -32,7 +32,7 @@ export function registerFillNotifications(
       debugLog("fill-notifications", "subscribing", { relayUrl, ownPublicKey });
 
       const sub = this.relay.subscribe(
-        [{ kinds: [4], "#p": [ownPublicKey] }],
+        [{ kinds: [4], "#p": [ownPublicKey], since: Math.floor(Date.now() / 1000) }],
         {
           onevent: async (event: any) => {
             if (event?.kind !== 4) return;
