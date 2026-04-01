@@ -2807,23 +2807,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
   });
 
   api.registerTool({
-    name: "get_backtest_status",
-    description: "Check the status of one or more backtest jobs",
-    parameters: Type.Object({
-      jobIds: Type.Array(Type.String(), { description: "Array of backtest job IDs" }),
-    }),
-    async execute(_id: string, params: { jobIds: string[] }) {
-      const res = await fetch(`${baseUrl}/api/backtests-status`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobIds: params.jobIds }),
-      });
-      if (!res.ok) throw new Error(`get__status failed: ${res.status}`);
-      return textResult(await res.json());
-    },
-  });
-
-  api.registerTool({
     name: "get_backtest_job",
     description: "Poll the progress and status of a backtest job",
     parameters: Type.Object({
