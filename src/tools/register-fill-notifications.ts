@@ -18,6 +18,8 @@ export function registerFillNotifications(
   const MAX_RECONNECT_DELAY_MS = 60_000;
   const BASE_RECONNECT_DELAY_MS = 1_000;
 
+  const seenEventIds = new Set<string>();
+
   api.registerService({
     id: "fill-notifications",
     _stopped: false,
@@ -63,6 +65,10 @@ export function registerFillNotifications(
             const hasRecipientTag = event.tags.some((tag: string[]) => tag[0] === "p" && tag[1] === ownPublicKey);
             if (!hasRecipientTag) return;
 
+            const eventId: string = event.id ?? "";
+            if (eventId && seenEventIds.has(eventId)) return;
+            if (eventId) seenEventIds.add(eventId);
+
             const sender = event.pubkey;
             if (!sender || typeof sender !== "string") return;
 
@@ -104,9 +110,17 @@ export function registerFillNotifications(
 
     _scheduleReconnect(attempt: number) {
       if (this._stopped) return;
+      // Cancel any pending reconnect before scheduling a new one so multiple
+      // onclose firings (e.g. relay drops then subscription closes) collapse
+      // into a single reconnect attempt.
+      if (this._reconnectTimer !== undefined) {
+        clearTimeout(this._reconnectTimer);
+        this._reconnectTimer = undefined;
+      }
       const delay = Math.min(BASE_RECONNECT_DELAY_MS * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
       debugLog("fill-notifications", "reconnect-scheduled", { delayMs: delay, attempt });
       this._reconnectTimer = setTimeout(() => {
+        this._reconnectTimer = undefined;
         void this._connect(attempt + 1);
       }, delay);
     },
