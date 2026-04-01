@@ -2758,9 +2758,30 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         throw new Error("create_backtest succeeded but response did not include a jobId");
       }
 
+      const topLevelEta =
+        typeof responseBody.eta === "object" && responseBody.eta !== null
+          ? responseBody.eta as Record<string, unknown>
+          : null;
+      const nestedEta =
+        typeof responseBody.data === "object" &&
+        responseBody.data !== null &&
+        typeof (responseBody.data as Record<string, unknown>).eta === "object" &&
+        (responseBody.data as Record<string, unknown>).eta !== null
+          ? (responseBody.data as Record<string, unknown>).eta as Record<string, unknown>
+          : null;
+      const etaMs = typeof topLevelEta?.ms === "number"
+        ? topLevelEta.ms
+        : typeof nestedEta?.ms === "number"
+          ? nestedEta.ms
+          : null;
+      const eta = etaMs != null && Number.isFinite(etaMs)
+        ? { ms: Math.max(0, Math.trunc(etaMs)) }
+        : undefined;
+
       return textResult({
         ...responseBody,
         jobId,
+        ...(eta ? { eta } : {}),
         status: "submitted",
         message: `Backtest job ${jobId} submitted.`,
       });
