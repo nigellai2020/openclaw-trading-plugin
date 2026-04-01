@@ -15,23 +15,46 @@ export function registerFillNotifications(
   const ownPublicKey = Keys.getPublicKey(privateKey);
   const sendNotification = createTelegramNotifier();
 
+  const MAX_RECONNECT_DELAY_MS = 60_000;
+  const BASE_RECONNECT_DELAY_MS = 1_000;
+
   api.registerService({
     id: "fill-notifications",
+    _stopped: false,
+    _reconnectTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+
     async start() {
+      this._stopped = false;
+      await this._connect(0);
+    },
+
+    async _connect(attempt: number) {
+      if (this._stopped) return;
+
+      let relay: any;
       try {
-        const relay = await Relay.connect(relayUrl);
+        relay = await Relay.connect(relayUrl);
         this.relay = relay;
       } catch (e: any) {
         debugLog("fill-notifications", "relay-connect-error", {
           relayUrl,
+          attempt,
           message: e?.message ?? String(e),
         });
+        this._scheduleReconnect(attempt);
         return;
       }
 
-      debugLog("fill-notifications", "subscribing", { relayUrl, ownPublicKey });
+      debugLog("fill-notifications", "subscribing", { relayUrl, ownPublicKey, attempt });
 
-      const sub = this.relay.subscribe(
+      // Reconnect when the relay-level connection drops
+      relay.onclose = () => {
+        if (this._stopped) return;
+        debugLog("fill-notifications", "relay-closed", { relayUrl });
+        this._scheduleReconnect(0);
+      };
+
+      const sub = relay.subscribe(
         [{ kinds: [4], "#p": [ownPublicKey], since: Math.floor(Date.now() / 1000) }],
         {
           onevent: async (event: any) => {
@@ -68,14 +91,32 @@ export function registerFillNotifications(
             }
           },
           onclose: (reason: string) => {
+            if (this._stopped) return;
             debugLog("fill-notifications", "subscription-closed", { reason });
+            // Subscription closed but relay may still be alive — resubscribe
+            this._scheduleReconnect(0);
           },
         },
       );
 
       this.subscription = sub;
     },
+
+    _scheduleReconnect(attempt: number) {
+      if (this._stopped) return;
+      const delay = Math.min(BASE_RECONNECT_DELAY_MS * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
+      debugLog("fill-notifications", "reconnect-scheduled", { delayMs: delay, attempt });
+      this._reconnectTimer = setTimeout(() => {
+        void this._connect(attempt + 1);
+      }, delay);
+    },
+
     stop() {
+      this._stopped = true;
+      if (this._reconnectTimer !== undefined) {
+        clearTimeout(this._reconnectTimer);
+        this._reconnectTimer = undefined;
+      }
       this.subscription?.close();
       this.relay?.close();
     },
