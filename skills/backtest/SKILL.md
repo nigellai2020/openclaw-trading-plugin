@@ -50,10 +50,27 @@ Call `create_backtest` with agentId, initialCapital, optional startTime, optiona
 - If there was no timezone phrase, pass the user's naive value and let the tool apply runtime-timezone fallback.
 - If the user did not provide a range, omit `startTime` and `endTime` so the tool applies the default rolling 30-day window.
 - If the backend rejects the submission, surface that backend error directly and STOP.
-- After submission, the first line must include the `jobId`. Keep the response simple: report the `jobId` and status. Do not echo technical lines like `Timezone used` or `Normalized UTC range` unless the user explicitly asks for them.
+- After submission, respond with this exact user-facing shape:
+  ```text
+  Status: <status>
+  Job ID: <jobId>
+  Message: <message>
+  ETA: <seconds> seconds (<minutes> minutes / <hours> hours)
+
+  Do you want me to keep checking this backtest result for you?
+  ```
+- Derive the response fields from the tool output:
+  - `status`: use the returned `status`
+  - `jobId`: use the normalized `jobId`
+  - `message`: use the returned `message`
+  - `eta`: derive from `eta.ms` and render seconds as a whole number, minutes with up to 2 decimals, and hours with up to 2 decimals
+- If `eta.ms` is missing, still include the ETA line as `ETA: unavailable`.
+- Do not echo technical lines like `Timezone used` or `Normalized UTC range` unless the user explicitly asks for them.
 
 ## Step 7 — Poll progress and fetch results
-Call `get_backtest_job` with the jobId to poll its progress and status.
+Only poll if the user explicitly wants continued checking after the Step 6 acknowledgment.
+- If the user does not ask to keep checking, stop after the submission response.
+- If the user wants a status update, call `get_backtest_job` with the jobId to poll its progress and status.
 - If status is **Completed**: call `get_backtest_result` with the jobId and present a summary including portfolio value, return %, win rate, max drawdown, Sharpe ratio, and trade count.
 - If still running: inform the user of the current progress, keep the initial acknowledgment tied to the `jobId`, and suggest checking again later.
 
