@@ -55,7 +55,7 @@ Call `create_backtest` with agentId, initialCapital, optional startTime, optiona
   Status: <status>
   Job ID: <jobId>
   Message: <message>
-  ETA: <seconds> seconds (<minutes> minutes / <hours> hours)
+  ETA: <human-readable ETA>
 
   Do you want me to keep checking this backtest result for you?
   ```
@@ -63,7 +63,11 @@ Call `create_backtest` with agentId, initialCapital, optional startTime, optiona
   - `status`: use the returned `status`
   - `jobId`: use the normalized `jobId`
   - `message`: use the returned `message`
-  - `eta`: derive from `eta.ms` and render seconds as a whole number, minutes with up to 2 decimals, and hours with up to 2 decimals
+  - `eta`: derive from `eta.ms` and render only non-zero units:
+    - under 60 seconds: `<seconds> seconds`
+    - under 60 minutes: `<seconds> seconds (<minutes> minutes)`
+    - 60 minutes or more: `<seconds> seconds (<minutes> minutes / <hours> hours)`
+  - render seconds as a whole number, and minutes/hours with up to 2 decimals when shown
 - If `eta.ms` is missing, still include the ETA line as `ETA: unavailable`.
 - Do not echo technical lines like `Timezone used` or `Normalized UTC range` unless the user explicitly asks for them.
 
