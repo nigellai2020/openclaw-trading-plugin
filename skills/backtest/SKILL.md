@@ -76,7 +76,20 @@ Only poll if the user explicitly wants continued checking after the Step 6 ackno
 - If the user does not ask to keep checking, stop after the submission response.
 - If the user wants a status update, call `get_backtest_job` with the jobId to poll its progress and status.
 - If status is **Completed**: call `get_backtest_result` with the jobId and present a summary including portfolio value, return %, win rate, max drawdown, Sharpe ratio, and trade count.
-- If still running: inform the user of the current progress, keep the initial acknowledgment tied to the `jobId`, and suggest checking again later.
+- If the job is not completed, respond with this user-facing shape:
+  ```text
+  Status: <status>
+  Job ID: <jobId>
+  Progress: <progress_percent>%
+  Message: Backtest is still running.
+  ```
+- Derive the response fields from the job-status output:
+  - `status`: use the returned `status`
+  - `jobId`: use the returned `job_id`
+  - `progress`: use the returned `progress_percent`
+- Format `progress_percent` with `%`, rounded to up to 2 decimals. If the value is a whole number, do not show trailing decimals.
+- If `progress_percent` is missing, still report status and job ID, and render `Progress: unavailable`.
+- Keep the status update tied to the same `jobId`, and suggest checking again later if the job is still running.
 
 ## Step 8 — Show backtest history
 Call `get_backtests` with the agentId to list past backtests for context.
