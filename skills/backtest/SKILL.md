@@ -50,11 +50,10 @@ Call `create_backtest` with agentId, initialCapital, optional startTime, optiona
 - If there was no timezone phrase, pass the user's naive value and let the tool apply runtime-timezone fallback.
 - If the user did not provide a range, omit `startTime` and `endTime` so the tool applies the default rolling 30-day window.
 - If the backend rejects the submission, surface that backend error directly and STOP.
-- After submission, respond with this exact user-facing shape:
+- After submission, respond with this user-facing shape, omitting the `ETA` line if unavailable:
   ```text
   Status: <status>
   Job ID: <jobId>
-  Message: <message>
   ETA: <human-readable ETA>
 
   Do you want me to keep checking this backtest result for you?
@@ -62,13 +61,12 @@ Call `create_backtest` with agentId, initialCapital, optional startTime, optiona
 - Derive the response fields from the tool output:
   - `status`: use the returned `status`
   - `jobId`: use the normalized `jobId`
-  - `message`: use the returned `message`
   - `eta`: derive from `eta.ms` and render only non-zero units:
     - under 60 seconds: `<seconds> seconds`
     - under 60 minutes: `<seconds> seconds (<minutes> minutes)`
     - 60 minutes or more: `<seconds> seconds (<minutes> minutes / <hours> hours)`
   - render seconds as a whole number, and minutes/hours with up to 2 decimals when shown
-- If `eta.ms` is missing, still include the ETA line as `ETA: unavailable`.
+- Only include the `ETA` line if `eta.ms` is present.
 - Do not echo technical lines like `Timezone used` or `Normalized UTC range` unless the user explicitly asks for them.
 
 ## Step 7 — Poll progress and fetch results
@@ -81,7 +79,6 @@ Only poll if the user explicitly wants continued checking after the Step 6 ackno
   Status: <status>
   Job ID: <jobId>
   Progress: <progress_percent>%
-  Message: Backtest is still running.
   ```
 - Derive the response fields from the job-status output:
   - `status`: use the returned `status`
