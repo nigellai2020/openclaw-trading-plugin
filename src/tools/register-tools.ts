@@ -17,6 +17,7 @@ import { CopyTradeOrderConfig, SimulationConfig, SimulationConfigPatch, Strategy
 import { registerFillNotifications } from "./register-fill-notifications.js";
 import type { EthHeaders, PreparedAgentCreationContext } from "../types/billing.js";
 import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
+import { sanitizeBacktestResultResponse } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
 import { deriveDefaultLiveBuyLimit, fetchEvmWalletBalances, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
@@ -2828,7 +2829,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     async execute(_id: string, params: { jobId: string }) {
       const res = await fetch(`${backtestEngineUrl}/jobs/${params.jobId}/result`);
       if (!res.ok) throw new Error(`get_backtest_result failed: ${res.status}`);
-      return textResult(await res.json());
+      return textResult(sanitizeBacktestResultResponse(await res.json(), params.jobId));
     },
   });
 
