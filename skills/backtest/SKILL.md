@@ -8,14 +8,19 @@ description: Run a backtest for a trading agent. Use when the user wants to back
 Follow these steps to run a backtest.
 
 ## Step 1 — Initialize session
+
 Call `init_trading_session` with mode `"paper"`. Handle the response:
+
 - **keys.generated = true**: Inform the user a new Nostr identity was created.
 
 ## Step 2 — Identify the agent
+
 If the user specified an agent ID, use it. Otherwise ask the user for the agent ID. Call `get_agent` to fetch the agent details (name, strategy, capital).
 
 ## Step 3 — Set backtest parameters
+
 Ask the user for:
+
 - **Time range**: start and end time
   - If the user does **not** specify a time range, default to a rolling 30-day window ending now. Do **not** invent a different default.
   - Do **not** expect the user to provide ISO timestamps with offsets directly.
@@ -34,24 +39,30 @@ Ask the user for:
 - **Gas fee** (optional): fee override
 
 ## Step 4 — Optionally override strategy
+
 If the user wants to test a different strategy, build a new one (indicators, rules, risk_manager). For detailed schema references, see the `strategy-reference` skill. Otherwise use the agent's existing strategy.
 
 ## Step 5 — Confirm before submitting
+
 Present a summary: agent name/ID, initial capital, fees (if any), strategy (existing or override), and the resolved time interpretation.
+
 - If the user did not provide a time range, explicitly say the default rolling 30-day window will be used and show that interpreted range.
 - If the user mentioned a timezone phrase, explicitly say which timezone OpenClaw resolved, and show the interpreted local range in a human-readable format like `2026-03-20 00:00:00 (+08:00)`, not raw ISO strings.
 - If the user gave explicit timezone offsets, say those exact times will be preserved.
 - If the user gave naive dates/times with no timezone phrase, explicitly say OpenClaw will interpret them in the runtime timezone.
-Ask the user to confirm before proceeding. Do NOT call `create_backtest` until the user explicitly confirms.
+  Ask the user to confirm before proceeding. Do NOT call `create_backtest` until the user explicitly confirms.
 
 ## Step 6 — Submit the backtest
+
 Call `create_backtest` with agentId, initialCapital, optional startTime, optional endTime, optional `timeZone`, and optional protocolFee, gasFee, strategy.
+
 - If OpenClaw resolved a timezone phrase from the user, pass offset-bearing ISO strings plus the resolved `timeZone`.
 - If there was no timezone phrase, pass the user's naive value and let the tool apply runtime-timezone fallback.
 - If the user did not provide a range, omit `startTime` and `endTime` so the tool applies the default rolling 30-day window.
-- If `create_backtest` fails with a `500` during submission, tell the user the request likely failed because there is not enough historical data for that pair in the requested time range. Do not present `Internal Server Error` as the primary explanation. You may suggest retrying with a shorter range or trying other pairs only after stating the likely insufficient-data cause, then STOP.
+- If `create_backtest` fails with a `500` during submission, tell the user the request is failed and one of the reason might be there is not enough historical data for that pair in the requested time range. Do not present `Internal Server Error` as the primary explanation. You may suggest retrying with a shorter range or trying other pairs only after stating the likely insufficient-data cause, then STOP.
 - If `create_backtest` fails with any other submission error, surface that backend error directly and STOP.
 - After submission, respond with this user-facing shape, omitting the `ETA` line if unavailable:
+
   ```text
   Status: <status>
   Job ID: <jobId>
@@ -59,6 +70,7 @@ Call `create_backtest` with agentId, initialCapital, optional startTime, optiona
 
   Do you want me to keep checking this backtest result for you?
   ```
+
 - Derive the response fields from the tool output:
   - `status`: use the returned `status`
   - `jobId`: use the normalized `jobId`
@@ -71,7 +83,9 @@ Call `create_backtest` with agentId, initialCapital, optional startTime, optiona
 - Do not echo technical lines like `Timezone used` or `Normalized UTC range` unless the user explicitly asks for them.
 
 ## Step 7 — Poll progress and fetch results
+
 Only poll if the user explicitly wants continued checking after the Step 6 acknowledgment.
+
 - If the user does not ask to keep checking, stop after the submission response.
 - If the user wants a status update, call `get_backtest_job` with the jobId to poll its progress and status.
 - If status is **Completed**: call `get_backtest_result` with the jobId and present a summary including portfolio value, return %, win rate, max drawdown, Sharpe ratio, and trade count.
@@ -90,4 +104,5 @@ Only poll if the user explicitly wants continued checking after the Step 6 ackno
 - Keep the status update tied to the same `jobId`, and suggest checking again later if the job is still running.
 
 ## Step 8 — Show backtest history
+
 Call `get_backtests` with the agentId to list past backtests for context.
