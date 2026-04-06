@@ -2814,8 +2814,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     }),
     async execute(_id: string, params: { jobId: string }) {
       const res = await fetch(`${baseUrl}/api/backtest-job/${params.jobId}`);
-      if (!res.ok) throw new Error(`get_backtest_job failed: ${res.status}`);
-      return textResult(await res.json());
+      const body = await res.json();
+      if (!res.ok) throw new Error(`get_backtest_job failed: ${res.status} ${responseErrorMessage(body)}`);
+      return textResult(body);
     },
   });
 
@@ -2827,8 +2828,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     }),
     async execute(_id: string, params: { jobId: string }) {
       const res = await fetch(`${baseUrl}/api/backtest-job/${params.jobId}/result`);
-      if (!res.ok) throw new Error(`get_backtest_result failed: ${res.status}`);
-      return textResult(sanitizeBacktestResultResponse(await res.json(), params.jobId));
+      const body = await res.json();
+      if (!res.ok) throw new Error(`get_backtest_result failed: ${res.status} ${responseErrorMessage(body)}`);
+      return textResult(sanitizeBacktestResultResponse(body, params.jobId));
     },
   });
 

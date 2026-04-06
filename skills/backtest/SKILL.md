@@ -102,6 +102,8 @@ Only poll if the user explicitly wants continued checking after the Step 6 ackno
 - Format `progress_percent` with `%`, rounded to up to 2 decimals. If the value is a whole number, do not show trailing decimals.
 - If `progress_percent` is missing, still report status and job ID, and omit the `Progress` line.
 - Keep the status update tied to the same `jobId`, and suggest checking again later if the job is still running.
+- If `get_backtest_job` or `get_backtest_result` fails with a `422` or `500`, tell the user the request failed and one of the reasons might be there is not enough historical OHLC data for that pair in the requested time range. Do not present `Internal Server Error` as the primary explanation. You may suggest retrying with a shorter range or trying other pairs only after stating the likely insufficient-data cause, then STOP.
+- If `get_backtest_job` or `get_backtest_result` fails with any other error, surface that backend error directly and STOP.
 
 ## Step 8 — Show backtest history
 
