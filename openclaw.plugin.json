@@ -13,10 +13,6 @@
         "type": "string",
         "default": "https://trading-agent.decom.dev"
       },
-      "backtestEngineUrl": {
-        "type": "string",
-        "default": "https://mcp-backtest01.decom.dev"
-      },
       "nostrPrivateKey": {
         "type": "string"
       },

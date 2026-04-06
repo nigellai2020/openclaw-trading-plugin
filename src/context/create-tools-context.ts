@@ -4,7 +4,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-  DEFAULT_BACKTEST_ENGINE_URL,
   DEFAULT_BASE_URL,
   DEFAULT_BOT_URL,
   DEFAULT_ELIGIBLE_NFT_NAME,
@@ -47,7 +46,6 @@ export function createToolsContext(api: any) {
   const pluginConfig = api.config?.plugins?.entries?.["trading-plugin"]?.config ?? api.config ?? {};
   const baseUrl: string = pluginConfig.baseUrl ?? DEFAULT_BASE_URL;
   const tradingBotUrl: string = pluginConfig.tradingBotUrl ?? DEFAULT_BOT_URL;
-  const backtestEngineUrl: string = pluginConfig.backtestEngineUrl ?? DEFAULT_BACKTEST_ENGINE_URL;
   const walletAgentUrl: string = pluginConfig.walletAgentUrl ?? DEFAULT_WALLET_AGENT_URL;
   const settlementEngineUrl: string = pluginConfig.settlementEngineUrl ?? DEFAULT_SETTLEMENT_ENGINE_URL;
   const billingEvmConfig = buildBillingEvmConfig(pluginConfig);
@@ -952,7 +950,6 @@ export function createToolsContext(api: any) {
     pluginConfig,
     baseUrl,
     tradingBotUrl,
-    backtestEngineUrl,
     walletAgentUrl,
     settlementEngineUrl,
     billingEvmConfig,

@@ -98,7 +98,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     pluginConfig,
     baseUrl,
     tradingBotUrl,
-    backtestEngineUrl,
     walletAgentUrl,
     settlementEngineUrl,
     billingEvmConfig,
@@ -2814,7 +2813,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       jobId: Type.String({ description: "Backtest job ID" }),
     }),
     async execute(_id: string, params: { jobId: string }) {
-      const res = await fetch(`${backtestEngineUrl}/jobs/${params.jobId}`);
+      const res = await fetch(`${baseUrl}/api/backtest-job/${params.jobId}`);
       if (!res.ok) throw new Error(`get_backtest_job failed: ${res.status}`);
       return textResult(await res.json());
     },
@@ -2827,7 +2826,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       jobId: Type.String({ description: "Backtest job ID" }),
     }),
     async execute(_id: string, params: { jobId: string }) {
-      const res = await fetch(`${backtestEngineUrl}/jobs/${params.jobId}/result`);
+      const res = await fetch(`${baseUrl}/api/backtest-job/${params.jobId}/result`);
       if (!res.ok) throw new Error(`get_backtest_result failed: ${res.status}`);
       return textResult(sanitizeBacktestResultResponse(await res.json(), params.jobId));
     },

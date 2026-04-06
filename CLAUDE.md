@@ -33,7 +33,6 @@ Modular OpenClaw plugin keeping `src/tools.ts` as the public entrypoint and movi
 | `tradingBotUrl`        | Trading bot notifications   |
 | `walletAgentUrl`       | TEE wallet storage          |
 | `settlementEngineUrl`  | Trader registration         |
-| (hardcoded)            | Backtest engine             |
 
 ### File structure
 
