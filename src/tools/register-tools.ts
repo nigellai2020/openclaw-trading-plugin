@@ -2813,7 +2813,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       jobId: Type.String({ description: "Backtest job ID" }),
     }),
     async execute(_id: string, params: { jobId: string }) {
-      const res = await fetch(`${baseUrl}/api/backtest-job/${params.jobId}`);
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const res = await fetch(`${baseUrl}/api/backtest-job/${params.jobId}`, {
+        headers: { Authorization: auth },
+      });
       const body = await res.json();
       if (!res.ok) throw new Error(`get_backtest_job failed: ${res.status} ${responseErrorMessage(body)}`);
       return textResult(body);
@@ -2827,7 +2831,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       jobId: Type.String({ description: "Backtest job ID" }),
     }),
     async execute(_id: string, params: { jobId: string }) {
-      const res = await fetch(`${baseUrl}/api/backtest-job/${params.jobId}/result`);
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const res = await fetch(`${baseUrl}/api/backtest-job/${params.jobId}/result`, {
+        headers: { Authorization: auth },
+      });
       const body = await res.json();
       if (!res.ok) throw new Error(`get_backtest_result failed: ${res.status} ${responseErrorMessage(body)}`);
       return textResult(sanitizeBacktestResultResponse(body, params.jobId));
