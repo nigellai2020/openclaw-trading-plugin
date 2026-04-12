@@ -11,10 +11,9 @@ Follow these steps to show the backtest leaderboard.
 
 Ask the user which period they want to see, or infer from their message:
 
-- **daily** / **1d**: Last 24 hours backtest results
-- **weekly** / **1w**: Last 7 days backtest results
-- **monthly** / **1m**: Last 30 days backtest results
-- **6m**: Last 6 months backtest results
+- **daily** / **1d**
+- **weekly** / **1w**
+- **monthly** / **1m**
 
 If the user asks for multiple periods, call the tool once per period.
 
@@ -26,9 +25,6 @@ If the response contains no data, inform the user that no completed backtests ar
 
 ## Step 3 — Present results
 
-Format the leaderboard as a table with columns: Rank, Agent Name, Symbol, Return %, Max Drawdown, Win Rate, PnL.
+Start with a title: **Agent's backtest leaderboard ({lookback_time}) with total return - top {N}** where `{lookback_time}` is "daily", "weekly", or "monthly" and `{N}` is the number of results.
 
-- Show `return_pct` and `max_drawdown` as percentages with 2 decimal places.
-- Show `win_rate` as a percentage if available, otherwise show "N/A".
-- Show `pnl` as USD with 2 decimal places.
-- Sort is already by return % descending from the API.
+Do NOT use a markdown table. For each agent, show: rank, name, symbol, and return %. Add a blank line between each agent. Keep it concise.
