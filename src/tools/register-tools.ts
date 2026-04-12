@@ -2842,6 +2842,31 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
+  // ── Backtest leaderboard ─────────────────────────────────────────
+
+  api.registerTool({
+    name: "backtest_leader_board",
+    description:
+      "Get the backtest leaderboard showing top-performing agents ranked by return percentage. " +
+      "Specify a period (1d, 1w, 1m, 6m) and optional limit.",
+    parameters: Type.Object({
+      period: Type.Union([
+        Type.Literal("1d"),
+        Type.Literal("1w"),
+        Type.Literal("1m"),
+        Type.Literal("6m"),
+      ], { description: "Backtest period: 1d (daily), 1w (weekly), 1m (monthly), 6m (6 months)" }),
+      limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50, default: 10, description: "Number of top agents to return (default 10, max 50)" })),
+    }),
+    async execute(_id: string, params: { period: string; limit?: number }) {
+      const limit = params.limit ?? 10;
+      const res = await fetch(`${baseUrl}/api/backtest-leaderboard?period=${params.period}&limit=${limit}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(`backtest_leader_board failed: ${res.status} ${responseErrorMessage(body)}`);
+      return textResult(body);
+    },
+  });
+
   // ── Fill execution notifications ─────────────────────────────────
   registerFillNotifications(api, pluginConfig, debugLog);
 }
