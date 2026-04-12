@@ -1,19 +1,19 @@
 ---
 name: backtest-leader-board
-description: Show the backtest leaderboard ranking top-performing agents by return percentage. Use when the user asks about best agents, top performers, backtest rankings, or leaderboard by period (daily, weekly, monthly, 6-month).
+description: Show the agent leaderboard ranking top-performing agents by backtest return percentage. Use when the user asks about leaderboard, rankings, best agents, or top performers.
 ---
 
 # Backtest Leaderboard
 
 Follow these steps to show the backtest leaderboard.
 
-## Step 1 — Determine the period
+## Step 1 — Determine the lookback period
 
-Ask the user which period they want to see, or infer from their message:
+Ask the user which lookback period they want to see, or infer from their message. These are lookback windows (how far back the backtest covers):
 
-- **daily** / **1d**
-- **weekly** / **1w**
-- **monthly** / **1m**
+- **daily** / **1d** — backtest over the last 1 day
+- **weekly** / **1w** — backtest over the last 7 days
+- **monthly** / **1m** — backtest over the last 30 days
 
 If the user asks for multiple periods, call the tool once per period.
 
@@ -25,6 +25,6 @@ If the response contains no data, inform the user that no completed backtests ar
 
 ## Step 3 — Present results
 
-Start with a title: **Agent's backtest leaderboard ({lookback_time}) with total return - top {N}** where `{lookback_time}` is "daily", "weekly", or "monthly" and `{N}` is the number of results.
+Start with a title: **Agent's backtest leaderboard ({lookback_time}) with total return - top {N}** where `{lookback_time}` is "1-day lookback", "7-day lookback", or "30-day lookback" and `{N}` is the number of results.
 
 Do NOT use a markdown table. For each agent, show: rank, name, symbol, and return %. Add a blank line between each agent. Keep it concise.

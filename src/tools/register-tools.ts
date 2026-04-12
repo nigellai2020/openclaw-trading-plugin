@@ -285,6 +285,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
+  /* Disabled — replaced by backtest_leader_board
   api.registerTool({
     name: "get_leaderboard",
     description: "Get the trading agent leaderboard with optional pagination and filters",
@@ -341,6 +342,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       return textResult(await res.json());
     },
   });
+  */
 
   api.registerTool({
     name: "get_agent_trades",
