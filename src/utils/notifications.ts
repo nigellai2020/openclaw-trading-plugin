@@ -2,6 +2,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+export function formatBacktestNotification(event: any): string {
+  const { agent_name, period, total_return, max_drawdown, win_rate } = event;
+  const name = agent_name || "Unknown Agent";
+  const ret = total_return != null ? `${Math.round(total_return * 100) / 100}%` : "N/A";
+  const dd = max_drawdown != null ? `${Math.round(max_drawdown * 100) / 100}%` : "N/A";
+  const wr = win_rate != null ? `${Math.round(win_rate * 100) / 100}%` : "N/A";
+  return `[Backtest Done] ${name} (${period || "?"}): Return ${ret}, MaxDD ${dd}, WinRate ${wr}`;
+}
+
 export function formatFillNotification(event: any): string {
   if (typeof event?.message === "string" && event.message.trim()) {
     return event.message.trim();

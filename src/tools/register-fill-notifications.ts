@@ -1,7 +1,7 @@
 import { Keys } from "@scom/scom-signer";
 import { Relay } from "nostr-tools";
 import { decrypt } from "nostr-tools/nip04";
-import { createTelegramNotifier, formatFillNotification } from "../utils/notifications.js";
+import { createTelegramNotifier, formatBacktestNotification, formatFillNotification } from "../utils/notifications.js";
 
 export function registerFillNotifications(
   api: any,
@@ -86,9 +86,13 @@ export function registerFillNotifications(
 
             try {
               const parsed = JSON.parse(decrypted);
-              if (parsed?.event !== "fill_executed") return;
-              const msg = formatFillNotification(parsed);
-              await sendNotification(msg);
+              if (parsed?.event === "fill_executed") {
+                const msg = formatFillNotification(parsed);
+                await sendNotification(msg);
+              } else if (parsed?.event === "backtest_completed") {
+                const msg = formatBacktestNotification(parsed);
+                await sendNotification(msg);
+              }
             } catch (e: any) {
               debugLog("fill-notifications", "parse-error", {
                 message: e?.message ?? String(e),
