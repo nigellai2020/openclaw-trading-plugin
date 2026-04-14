@@ -16,11 +16,14 @@ Complete guide to creating trading strategy JSON files for the Trading Rule Engi
 4. [Expressions](#expressions)
    - [Expression Syntax](#expression-syntax)
    - [Operators](#operators)
+   - [Rolling Max/Min Expressions](#rolling-maxmin-expressions)
    - [Usage in Conditions](#usage-in-conditions)
    - [Usage in Position Sizing](#usage-in-position-sizing)
    - [Expression Examples](#expression-examples)
 5. [Rules](#rules)
    - [Conditions](#rule-conditions)
+   - [Time Range Condition](#9-time-range-condition)
+   - [Day of Week Condition](#10-day-of-week-condition)
    - [Order Specification](#order-specification)
    - [Size Modes](#size-modes)
    - [Pyramiding (Scale-In)](#pyramiding-scale-in)
@@ -31,14 +34,12 @@ Complete guide to creating trading strategy JSON files for the Trading Rule Engi
    - [Cooldown](#cooldown)
    - [Per-Bar Limits](#per-bar-limits)
 7. [Complete Examples](#complete-examples)
-8. [Deprecated Features](#deprecated-features)
 
 ---
 
 ## Overview
 
 A strategy JSON file defines a complete trading strategy including:
-
 - **Indicators**: Technical indicators to calculate (RSI, MACD, SMA, etc.)
 - **Rules**: Entry and exit conditions based on indicator values
 - **Risk Management**: Stop loss, take profit, trailing stops, and trade limits
@@ -60,18 +61,18 @@ A strategy JSON file defines a complete trading strategy including:
 
 ### Required Fields
 
-| Field        | Type   | Description                                        |
-| ------------ | ------ | -------------------------------------------------- |
-| `name`       | string | Unique identifier for the strategy                 |
-| `symbol`     | string | Trading pair symbol (e.g., "ETH/USDC", "BTC/USDC") |
-| `indicators` | array  | List of technical indicators to calculate          |
-| `rules`      | array  | List of trading rules (entry/exit conditions)      |
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Unique identifier for the strategy |
+| `symbol` | string | Trading pair symbol (e.g., "ETH/USDC", "BTC/USDC") |
+| `indicators` | array | List of technical indicators to calculate |
+| `rules` | array | List of trading rules (entry/exit conditions) |
 
 ### Optional Fields
 
-| Field          | Type   | Default | Description                   |
-| -------------- | ------ | ------- | ----------------------------- |
-| `risk_manager` | object | null    | Risk management configuration |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `risk_manager` | object | null | Risk management configuration |
 
 ### Example
 
@@ -105,20 +106,19 @@ Indicators are technical analysis calculations that generate values used in trad
 
 ### Indicator Fields
 
-| Field       | Type   | Required | Description                                                        |
-| ----------- | ------ | -------- | ------------------------------------------------------------------ |
-| `type`      | string | ✓        | Indicator type (see [Supported Indicators](#supported-indicators)) |
-| `name`      | string | ✓        | Unique name to reference this indicator in rules                   |
-| `period`    | number | \*       | Period/length for the indicator (required for most)                |
-| `timeframe` | string |          | Timeframe: "M1", "M5", "M15", "M30", "H1", "H4", "D1"              |
-| `params`    | object |          | Additional parameters (varies by indicator type)                   |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | ✓ | Indicator type (see [Supported Indicators](#supported-indicators)) |
+| `name` | string | ✓ | Unique name to reference this indicator in rules |
+| `period` | number | * | Period/length for the indicator (required for most) |
+| `timeframe` | string | | Timeframe: "M1", "M5", "M15", "M30", "H1", "H4", "D1" |
+| `params` | object | | Additional parameters (varies by indicator type) |
 
 ### Supported Indicators
 
 #### 1. RSI (Relative Strength Index)
 
 **Simple Format:**
-
 ```json
 {
   "type": "rsi",
@@ -129,7 +129,6 @@ Indicators are technical analysis calculations that generate values used in trad
 ```
 
 **With Params:**
-
 ```json
 {
   "type": "rsi",
@@ -172,7 +171,6 @@ Indicators are technical analysis calculations that generate values used in trad
 ```
 
 **Alternative with params:**
-
 ```json
 {
   "type": "ema",
@@ -204,13 +202,11 @@ Indicators are technical analysis calculations that generate values used in trad
 ```
 
 **Parameters:**
-
 - `fast_period`: Fast EMA period (default: 12)
 - `slow_period`: Slow EMA period (default: 26)
 - `signal_period`: Signal line period (default: 9)
 
 **Outputs:**
-
 - `macd_macd` or `macd.macd`: MACD line value
 - `macd_signal` or `macd.signal`: Signal line value
 - `macd_histogram` or `macd.histogram`: Histogram value (MACD - Signal)
@@ -236,14 +232,12 @@ Indicators are technical analysis calculations that generate values used in trad
 ```
 
 **Parameters:**
-
 - `rsi_period`: RSI calculation period (default: 14)
 - `stoch_period`: Stochastic calculation period (default: 14)
 - `k_period`: %K smoothing period (default: 3)
 - `d_period`: %D smoothing period (default: 3)
 
 **Outputs:**
-
 - `stochrsi_k`: %K line (0-100)
 - `stochrsi_d`: %D line (0-100)
 
@@ -252,7 +246,6 @@ Indicators are technical analysis calculations that generate values used in trad
 #### 6. Stochastic Oscillator
 
 **Format 1:**
-
 ```json
 {
   "type": "stochastic",
@@ -264,7 +257,6 @@ Indicators are technical analysis calculations that generate values used in trad
 ```
 
 **Format 2:**
-
 ```json
 {
   "type": "stoch",
@@ -279,13 +271,11 @@ Indicators are technical analysis calculations that generate values used in trad
 ```
 
 **Parameters:**
-
 - `k_period`: %K period (default: 14)
 - `d_period`: %D period (default: 3)
 - `smooth_k`: %K smoothing period (default: 3)
 
 **Outputs:**
-
 - `stoch_k` or `stoch.k`: %K line (0-100)
 - `stoch_d` or `stoch.d`: %D line (0-100)
 
@@ -294,7 +284,6 @@ Indicators are technical analysis calculations that generate values used in trad
 #### 7. Bollinger Bands
 
 **Format 1:**
-
 ```json
 {
   "type": "bollinger",
@@ -306,7 +295,6 @@ Indicators are technical analysis calculations that generate values used in trad
 ```
 
 **Format 2:**
-
 ```json
 {
   "type": "bollinger",
@@ -320,12 +308,10 @@ Indicators are technical analysis calculations that generate values used in trad
 ```
 
 **Parameters:**
-
 - `period`: Moving average period (default: 20)
 - `std_dev`: Standard deviation multiplier (default: 2.0, typical range: 0.5-5.0)
 
 **Outputs:**
-
 - `bb_upper` or `bb.upper`: Upper band
 - `bb_middle` or `bb.middle`: Middle band (SMA)
 - `bb_lower` or `bb.lower`: Lower band
@@ -347,7 +333,6 @@ Indicators are technical analysis calculations that generate values used in trad
 ```
 
 **Parameters:**
-
 - `period`: ATR calculation period (default: 14)
 - `multiplier`: Multiplier for ATR value (default: 1.0)
 
@@ -374,11 +359,9 @@ Renko charts display price movements as "bricks" of a fixed size, filtering out 
 ```
 
 **Parameters:**
-
 - `brick_size` (required): Fixed size of each Renko brick in price units
 
 **Outputs:**
-
 - `renko_10.brick_high`: High price of the current brick
 - `renko_10.brick_low`: Low price of the current brick
 - `renko_10.direction`: Brick direction (1 = Up, -1 = Down, 0 = None/Not initialized)
@@ -387,7 +370,6 @@ Renko charts display price movements as "bricks" of a fixed size, filtering out 
 - `renko_10.brick_size`: The configured brick size
 
 **Example Usage:**
-
 ```json
 {
   "id": "renko_buy_signal",
@@ -440,12 +422,10 @@ RenkoATR uses the Average True Range (ATR) to dynamically adjust the brick size,
 **Alternative spelling:** `"renkoatr"` (case-insensitive)
 
 **Parameters:**
-
 - `atr_period` (required): Period for ATR calculation
 - `atr_multiplier` (required): Multiplier for ATR value to determine brick size
 
 **Outputs:** Same as Renko indicator
-
 - `renko_adaptive.brick_high`
 - `renko_adaptive.brick_low`
 - `renko_adaptive.direction`
@@ -454,7 +434,6 @@ RenkoATR uses the Average True Range (ATR) to dynamically adjust the brick size,
 - `renko_adaptive.brick_size`: Current ATR-based brick size
 
 **Use Cases:**
-
 - Volatility-adapted trend following
 - Dynamic support/resistance levels
 - Noise filtering in varying market conditions
@@ -478,7 +457,6 @@ OHLC indicators provide access to candle-based Open, High, Low, Close, and Volum
 **Parameters:** None required (empty `params` object)
 
 **Outputs:**
-
 - `ohlc_m5.open`: Opening price of the current candle
 - `ohlc_m5.high`: Highest price in the current candle
 - `ohlc_m5.low`: Lowest price in the current candle
@@ -486,7 +464,6 @@ OHLC indicators provide access to candle-based Open, High, Low, Close, and Volum
 - `ohlc_m5.volume`: Volume for the current candle
 
 **Multi-Timeframe Example:**
-
 ```json
 {
   "indicators": [
@@ -543,14 +520,12 @@ OHLC indicators provide access to candle-based Open, High, Low, Close, and Volum
 ```
 
 **Use Cases:**
-
 - Multi-timeframe analysis
 - Breakout strategies (close > high of previous bar)
 - Inside bar / outside bar patterns
 - High/low of day strategies
 
 **Note:** OHLC indicators support lookback syntax to access historical bars using dot or underscore notation:
-
 ```json
 {
   "indicator": "ohlc_m5.high[1]",
@@ -558,6 +533,495 @@ OHLC indicators provide access to candle-based Open, High, Low, Close, and Volum
   "value": 3000
 }
 ```
+
+---
+
+#### 12. ADX (Average Directional Index)
+
+ADX measures trend strength. The `plus_di` and `minus_di` outputs indicate directional movement, while `adx` measures trend intensity.
+
+```json
+{
+  "type": "adx",
+  "name": "adx14",
+  "timeframe": "H4",
+  "params": { "period": 14 }
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `period` | integer | Lookback period (default: 14) |
+
+**Outputs:**
+- `adx14.adx`: Trend strength (0–100); values above 25 indicate a strong trend
+- `adx14.plus_di`: +DI (positive directional indicator)
+- `adx14.minus_di`: −DI (negative directional indicator)
+
+**Example — ADX Trend Filter with DI Crossover:**
+```json
+{
+  "indicators": [
+    {
+      "type": "adx",
+      "name": "adx14",
+      "timeframe": "H4",
+      "params": { "period": 14 }
+    }
+  ],
+  "rules": [
+    {
+      "id": "adx_long_entry",
+      "intent": "open",
+      "when": {
+        "all": [
+          { "indicator": "adx14.adx",      "op": "gt",            "value": 25 },
+          { "indicator": "adx14.plus_di",  "op": "crosses_above", "other": "adx14.minus_di" }
+        ]
+      },
+      "order": { "side": "long", "type": "market", "size": { "mode": "percent", "value": 100 } }
+    }
+  ]
+}
+```
+
+**Use Cases:**
+- Filter entries to only trade when trend strength is confirmed (`adx > 25`)
+- DI crossovers for directional bias
+- Exit when ADX drops below 20 (trend exhaustion)
+
+---
+
+#### 13. SuperTrend
+
+SuperTrend is an ATR-based trend-following indicator that provides a support/resistance price level and a directional signal (+1 bullish, −1 bearish).
+
+```json
+{
+  "type": "supertrend",
+  "name": "st",
+  "timeframe": "H4",
+  "params": { "atr_period": 10, "multiplier": 3.0 }
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `atr_period` | integer | ATR lookback period (default: 10) |
+| `multiplier` | float | ATR multiplier for band width (default: 3.0) |
+
+**Outputs:**
+- `st.value`: SuperTrend price level (acts as trailing stop)
+- `st.direction`: +1 when bullish (price above band), −1 when bearish (price below band)
+
+**Detecting Direction Flip (Cross Approximation):**
+
+Because `direction` is a discrete step value (+1/−1) rather than a continuous indicator, use the two-condition lookback pattern to approximate a crossover:
+
+```json
+{
+  "when": {
+    "all": [
+      { "indicator": "st.direction[1]", "op": "lt", "value": 0 },
+      { "indicator": "st.direction",    "op": "gt", "value": 0 }
+    ]
+  }
+}
+```
+
+**Example — SuperTrend Trend-Following:**
+```json
+{
+  "indicators": [
+    {
+      "type": "supertrend",
+      "name": "st",
+      "timeframe": "H4",
+      "params": { "atr_period": 10, "multiplier": 3.0 }
+    }
+  ],
+  "rules": [
+    {
+      "id": "st_long",
+      "intent": "open",
+      "when": {
+        "all": [
+          { "indicator": "st.direction[1]", "op": "lt", "value": 0 },
+          { "indicator": "st.direction",    "op": "gt", "value": 0 }
+        ]
+      },
+      "order": { "side": "long", "type": "market", "size": { "mode": "percent", "value": 100 } }
+    },
+    {
+      "id": "st_exit_long",
+      "intent": "close",
+      "when": { "indicator": "st.direction", "op": "lt", "value": 0 },
+      "order": { "type": "market", "size": { "mode": "all" } }
+    }
+  ]
+}
+```
+
+**Use Cases:**
+- Trend-following entries on direction flip
+- Dynamic trailing stop using `st.value` as a price level reference
+- Multi-timeframe trend confirmation (H4 direction filter + M15 entry)
+
+---
+
+#### 14. Donchian Channel
+
+Donchian Channels track the highest high and lowest low over a period, forming breakout channels.
+
+```json
+{
+  "type": "donchian",
+  "name": "dc20",
+  "timeframe": "D1",
+  "params": { "period": 20 }
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `period` | integer | Lookback period for high/low calculation (default: 20) |
+
+**Outputs:**
+- `dc20.upper`: Highest high over `period` bars
+- `dc20.lower`: Lowest low over `period` bars
+- `dc20.middle`: Midpoint `(upper + lower) / 2`
+
+**Example — Donchian Breakout:**
+```json
+{
+  "indicators": [
+    {
+      "type": "donchian",
+      "name": "dc20",
+      "timeframe": "D1",
+      "params": { "period": 20 }
+    }
+  ],
+  "rules": [
+    {
+      "id": "donchian_breakout_long",
+      "intent": "open",
+      "when": { "indicator": "price", "op": "crosses_above", "other": "dc20.upper" },
+      "order": { "side": "long", "type": "market", "size": { "mode": "percent", "value": 100 } }
+    },
+    {
+      "id": "donchian_exit_long",
+      "intent": "close",
+      "when": { "indicator": "price", "op": "lt", "other": "dc20.middle" },
+      "order": { "type": "market", "size": { "mode": "all" } }
+    }
+  ]
+}
+```
+
+**Use Cases:**
+- Turtle-style channel breakout systems
+- Support/resistance levels using upper/lower bands
+- Middle band as a mean-reversion target
+
+---
+
+#### 15. Keltner Channel
+
+Keltner Channels are volatility-based envelopes set above and below an EMA using ATR. They are similar to Bollinger Bands but use ATR instead of standard deviation.
+
+```json
+{
+  "type": "keltner",
+  "name": "kc",
+  "timeframe": "H4",
+  "params": { "ema_period": 20, "atr_period": 10, "multiplier": 2.0 }
+}
+```
+
+**Alias:** `"type": "kc"` is also accepted.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `ema_period` | integer | EMA period for the middle band (default: 20) |
+| `atr_period` | integer | ATR period for band width (default: 10) |
+| `multiplier` | float | ATR multiplier for band distance (default: 2.0) |
+
+**Outputs:**
+- `kc.upper`: Upper channel band (`EMA + multiplier × ATR`)
+- `kc.middle`: Middle EMA line
+- `kc.lower`: Lower channel band (`EMA − multiplier × ATR`)
+
+**Example — Keltner Channel Breakout:**
+```json
+{
+  "indicators": [
+    {
+      "type": "keltner",
+      "name": "kc",
+      "timeframe": "H4",
+      "params": { "ema_period": 20, "atr_period": 10, "multiplier": 2.0 }
+    }
+  ],
+  "rules": [
+    {
+      "id": "kc_breakout_long",
+      "intent": "open",
+      "when": { "indicator": "price", "op": "crosses_above", "other": "kc.upper" },
+      "order": { "side": "long", "type": "market", "size": { "mode": "percent", "value": 100 } }
+    },
+    {
+      "id": "kc_mean_revert",
+      "intent": "close",
+      "when": { "indicator": "price", "op": "lt", "other": "kc.middle" },
+      "order": { "type": "market", "size": { "mode": "all" } }
+    }
+  ]
+}
+```
+
+**Combining Keltner + Bollinger Bands (Squeeze Detection):**
+```json
+{
+  "all": [
+    { "indicator": "bb_upper",  "op": "lt", "other": "kc.upper"  },
+    { "indicator": "bb_lower",  "op": "gt", "other": "kc.lower"  }
+  ]
+}
+```
+When Bollinger Bands are inside the Keltner Channel, a volatility squeeze is forming — a precursor to a breakout.
+
+**Use Cases:**
+- Volatility breakout entries when price exits the channel
+- Mean reversion to the middle EMA
+- Squeeze detection combined with Bollinger Bands
+
+---
+
+#### 16. Parabolic SAR
+
+Parabolic SAR (Stop and Reverse) is a trend-following indicator that provides potential reversal points. The `direction` field is `1` (bullish) or `-1` (bearish).
+
+**Configuration:**
+```json
+{
+  "type": "sar",
+  "name": "sar",
+  "timeframe": "H1",
+  "params": { "step": 0.02, "max_step": 0.2 }
+}
+```
+
+**Alternative type names:** `"parabolic_sar"`, `"psar"`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `step` | float | 0.02 | Acceleration factor step size |
+| `max_step` | float | 0.2 | Maximum acceleration factor |
+
+**Output fields:** `{name}.value`, `{name}.direction`
+
+**Example — SAR Direction Flip:**
+```json
+{
+  "all": [
+    { "indicator": "sar.direction[1]", "op": "lt", "value": 0 },
+    { "indicator": "sar.direction",    "op": "gt", "value": 0 }
+  ]
+}
+```
+
+**Use Cases:**
+- Trend reversal entry on direction flip
+- Trailing stop replacement using SAR value
+- Trend filter combined with momentum indicators
+
+---
+
+#### 17. Ichimoku Cloud
+
+Ichimoku Kinko Hyo is a comprehensive trend indicator providing support/resistance, momentum, and direction signals in one system.
+
+**Configuration:**
+```json
+{
+  "type": "ichimoku",
+  "name": "ich",
+  "timeframe": "H4",
+  "params": { "tenkan_period": 9, "kijun_period": 26, "senkou_b_period": 52 }
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `tenkan_period` | int | 9 | Tenkan-sen (Conversion line) period |
+| `kijun_period` | int | 26 | Kijun-sen (Base line) period |
+| `senkou_b_period` | int | 52 | Senkou Span B period (cloud width) |
+
+**Output fields:** `{name}.tenkan`, `{name}.kijun`, `{name}.span_a`, `{name}.span_b`, `{name}.chikou`
+
+**Example — Tenkan/Kijun Crossover:**
+```json
+{ "indicator": "ich.tenkan", "op": "crosses_above", "other": "ich.kijun" }
+```
+
+**Example — Price Above Cloud:**
+```json
+{
+  "all": [
+    { "indicator": "price", "op": "gt", "other": "ich.span_a" },
+    { "indicator": "price", "op": "gt", "other": "ich.span_b" }
+  ]
+}
+```
+
+**Use Cases:**
+- Tenkan/Kijun crossovers for trend entries
+- Cloud breakouts for momentum trades
+- Kijun bounce trades in trending markets
+- Crypto-adjusted periods (10/30/60) for 24/7 markets
+
+---
+
+#### 18. CCI (Commodity Channel Index)
+
+CCI measures price deviation from its statistical average. Values above +100 indicate overbought; below -100 indicate oversold.
+
+**Configuration:**
+```json
+{ "type": "cci", "name": "cci20", "period": 20, "timeframe": "H1" }
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `period` | int | 20 | Lookback period |
+
+**Output:** Single value (access directly as `{name}`)
+
+**Example — Mean Reversion at ±100:**
+```json
+{ "indicator": "cci20[1]", "op": "lt", "value": -100 }
+```
+then:
+```json
+{ "indicator": "cci20", "op": "gt", "value": -100 }
+```
+
+**Use Cases:**
+- Mean reversion at ±100 or ±200 thresholds
+- Zero-line crossover for trend-following
+- EMA-filtered entries to avoid counter-trend trades
+
+---
+
+#### 19. Heikin-Ashi
+
+Heikin-Ashi candles smooth price action to make trends more visible. Bullish candles have `close > open`; bearish candles have `close < open`.
+
+**Configuration:**
+```json
+{
+  "type": "heikin_ashi",
+  "name": "ha",
+  "timeframe": "H1"
+}
+```
+
+**Alternative type names:** `"ha"`
+
+No parameters are required. 
+
+**Output fields:** `{name}.open`, `{name}.high`, `{name}.low`, `{name}.close`
+
+**Example — HA Color Change (Bullish):**
+```json
+{
+  "all": [
+    { "indicator": "ha.close[1]", "op": "lt", "other": "ha.open[1]" },
+    { "indicator": "ha.close",    "op": "gt", "other": "ha.open" }
+  ]
+}
+```
+
+**Use Cases:**
+- Color change entries at trend reversals
+- Trend continuation trades when HA stays same color
+- Combined with EMA or RSI for confirmation signals
+
+---
+
+#### 20. Linear Regression
+
+Fits an ordinary least-squares regression line through the last N prices. Outputs the regression value at the current bar and the slope of the line.
+
+**Configuration:**
+```json
+{ "type": "linreg", "name": "lr14", "period": 14, "timeframe": "H1" }
+```
+
+**Alternative type names:** `"linear_regression"`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `period` | int (≥2) | 14 | Number of bars for regression |
+
+**Output fields:** `{name}.slope`, `{name}.value`
+
+**Example — Slope-based Trend Filter:**
+```json
+{
+  "all": [
+    { "indicator": "lr14.slope", "op": "gt", "value": 0 },
+    { "indicator": "price", "op": "crosses_above", "other": "ema20" }
+  ]
+}
+```
+
+**Use Cases:**
+- Slope as a trend filter (positive = uptrend)
+- Slope crossover for trend-following entries
+- Price vs regression value for mean reversion
+
+---
+
+#### 21. Z-Score
+
+Z-Score measures how many standard deviations the current price is from its rolling mean. Common thresholds: ±2 for mean reversion, ±3 for extreme moves.
+
+**Configuration:**
+```json
+{ "type": "zscore", "name": "z20", "period": 20, "timeframe": "H1" }
+```
+
+**Alternative type names:** `"z_score"`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `period` | int | 20 | Rolling window length |
+
+**Output:** Single value (access directly as `{name}`)
+
+**Example — Mean Reversion at ±2:**
+```json
+{ "indicator": "z20[1]", "op": "lt", "value": -2 }
+```
+then:
+```json
+{ "indicator": "z20", "op": "gt", "value": -2 }
+```
+
+**Use Cases:**
+- Mean reversion at statistical extremes (±2 or ±3)
+- Zero-line crossover for trend-following
+- EMA-filtered entries (long only above EMA, short only below)
 
 ---
 
@@ -574,7 +1038,6 @@ You can reference the current live market price in rules using the `"price"` ind
 ```
 
 The `"price"` indicator refers to the **current live tick price** and requires no indicator definition. It's useful for:
-
 - Comparing current price against moving averages
 - Simple threshold-based entries/exits
 - Quick price comparisons without bar/candle data
@@ -582,7 +1045,6 @@ The `"price"` indicator refers to the **current live tick price** and requires n
 **Alternative Names:** `"current_price"` is also supported as an alias for `"price"`.
 
 **Example - Price Above SMA:**
-
 ```json
 {
   "id": "price_above_sma",
@@ -627,16 +1089,13 @@ For bar/candle-based strategies, **define an OHLC indicator** to access open, hi
 ```
 
 OHLC indicators provide:
-
 - **Historical lookback**: Access previous bar data with `[1]`, `[2]`, etc.
 - **All OHLC components**: `open`, `high`, `low`, `close`, `volume`
 - **Multi-timeframe support**: Define separate OHLC indicators for each timeframe
 
 **When to use:**
-
 - ✅ Use `"price"` for simple current price comparisons
 - ✅ Use OHLC indicators (`ohlc_m1.close`) for bar-based strategies with lookback
-- ❌ **DEPRECATED:** Don't use `"close"`, `"open"`, `"high"`, `"low"` directly (see [Deprecated Features](#deprecated-features))
 
 ---
 
@@ -646,90 +1105,173 @@ Expressions enable **dynamic calculations** and **complex logic** in your tradin
 
 ### Expression Syntax
 
-Expressions are defined using a structured JSON format that represents an Abstract Syntax Tree (AST). Each expression is an object with an operator type and operands.
+Expressions use a tagged JSON format where each node has a `"type"` field indicating the operation.
 
-**Basic Structure:**
-
+**Leaf nodes:**
 ```json
-{
-  "operator": "add|sub|mul|div|abs|neg|average|min|max",
-  "operands": [...]
-}
+{ "type": "number", "value": 42.5 }
+{ "type": "indicator", "name": "rsi14" }
 ```
 
-**Operand Types:**
-
-- **Number**: `{"number": 42.5}`
-- **Indicator**: `{"indicator": "rsi14"}`
-- **Nested Expression**: Another expression object
+**Nested expressions** can be used anywhere an operand is expected.
 
 ### Operators
 
-#### Arithmetic Operators
+#### Arithmetic Operators (binary — `left` and `right` fields)
 
-| Operator | Description    | Example                                                                                | Result     |
-| -------- | -------------- | -------------------------------------------------------------------------------------- | ---------- |
-| `add`    | Addition       | `{"operator": "add", "operands": [{"number": 100}, {"indicator": "rsi14"}]}`           | 100 + RSI  |
-| `sub`    | Subtraction    | `{"operator": "sub", "operands": [{"indicator": "rsi14"}, {"indicator": "rsi14[1]"}]}` | RSI slope  |
-| `mul`    | Multiplication | `{"operator": "mul", "operands": [{"number": 500}, {"indicator": "macd_histogram"}]}`  | 500 × MACD |
-| `div`    | Division       | `{"operator": "div", "operands": [{"number": 1000}, {"indicator": "atr14"}]}`          | 1000 / ATR |
+| Type | Description | Example |
+|------|-------------|---------|
+| `add` | Addition | `{"type": "add", "left": {"type": "number", "value": 100}, "right": {"type": "indicator", "name": "rsi14"}}` |
+| `sub` | Subtraction | `{"type": "sub", "left": {"type": "indicator", "name": "rsi14"}, "right": {"type": "indicator", "name": "rsi14[1]"}}` |
+| `mul` | Multiplication | `{"type": "mul", "left": {"type": "number", "value": 500}, "right": {"type": "indicator", "name": "macd_histogram"}}` |
+| `div` | Division | `{"type": "div", "left": {"type": "number", "value": 1000}, "right": {"type": "indicator", "name": "atr14"}}` |
+| `min` | Minimum of two | `{"type": "min", "left": {"type": "indicator", "name": "price"}, "right": {"type": "number", "value": 3000}}` |
+| `max` | Maximum of two | `{"type": "max", "left": {"type": "indicator", "name": "atr14"}, "right": {"type": "number", "value": 5}}` |
 
-#### Unary Operators
+#### Unary Operators (single operand — `expr` field)
 
-| Operator | Description    | Example                                                              | Result   |
-| -------- | -------------- | -------------------------------------------------------------------- | -------- |
-| `abs`    | Absolute value | `{"operator": "abs", "operands": [{"indicator": "macd_histogram"}]}` | \|MACD\| |
-| `neg`    | Negation       | `{"operator": "neg", "operands": [{"indicator": "rsi14"}]}`          | -RSI     |
+| Type | Description | Example |
+|------|-------------|---------|
+| `abs` | Absolute value | `{"type": "abs", "expr": {"type": "indicator", "name": "macd_histogram"}}` |
+| `neg` | Negation | `{"type": "neg", "expr": {"type": "indicator", "name": "rsi14"}}` |
 
-#### Statistical Operators
+#### Aggregate Operators
 
-| Operator  | Description      | Example                                                                                       | Result                    |
-| --------- | ---------------- | --------------------------------------------------------------------------------------------- | ------------------------- |
-| `average` | Mean of operands | `{"operator": "average", "operands": [{"indicator": "bb_upper"}, {"indicator": "bb_lower"}]}` | (BB_upper + BB_lower) / 2 |
-| `min`     | Minimum value    | `{"operator": "min", "operands": [{"indicator": "price"}, {"number": 3000}]}`                 | min(price, 3000)          |
-| `max`     | Maximum value    | `{"operator": "max", "operands": [{"indicator": "atr14"}, {"number": 5}]}`                    | max(ATR, 5)               |
+| Type | Description | Fields |
+|------|-------------|--------|
+| `average` | Rolling mean of indicator over N bars | `{"type": "average", "indicator": "rsi14", "periods": 5}` |
+
+---
+
+### Rolling Max/Min Expressions
+
+`rolling_max` and `rolling_min` compute the maximum or minimum value of an indicator over the last N closed bars. They use the same bar history as lookback (`[n]`) — up to **10 bars** of history.
+
+#### Syntax
+
+```json
+{ "type": "rolling_max", "indicator": "<name>", "periods": N }
+{ "type": "rolling_min", "indicator": "<name>", "periods": N }
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | `"rolling_max"` or `"rolling_min"` |
+| `indicator` | string | Indicator name (supports dot notation, e.g., `"bars.high"`) |
+| `periods` | integer | Look-back window, 1–10 |
+
+> **Limit:** `periods` must be ≤ 10 (the maximum bar history depth). Using a larger value silently clamps to available history.
+
+#### OHLC Component Support
+
+When you have an OHLC indicator named `"bars"`, you can reference its price components:
+- `"bars.high"` / `"bars_high"` — high price history
+- `"bars.low"` / `"bars_low"` — low price history
+- `"bars.close"` / `"bars_close"` — close price history
+
+#### Usage in ExpressionCondition
+
+Rolling expressions are used inside an `ExpressionCondition`:
+
+```json
+{
+  "expression": { "type": "...", ... },
+  "op": "gt|lt|ge|le|eq",
+  "value": <number or indicator name>
+}
+```
+
+Use `"value": "price"` to compare against the current tick price.
+
+#### Examples
+
+**Chandelier Exit stop check** — is current price below the recent high minus 2×ATR?
+```json
+{
+  "expression": {
+    "type": "sub",
+    "left":  { "type": "rolling_max", "indicator": "bars.high", "periods": 10 },
+    "right": { "type": "mul",
+               "left":  { "type": "number",    "value": 2.0 },
+               "right": { "type": "indicator", "name": "atr14" } }
+  },
+  "op": "gt",
+  "value": "price"
+}
+```
+Fires when `rolling_max(bars.high, 10) - 2*ATR > price`, i.e., price has dropped below the Chandelier Exit stop.
+
+**Donchian channel breakout** — price above the 10-bar high:
+```json
+{
+  "expression": { "type": "rolling_max", "indicator": "bars.high", "periods": 10 },
+  "op": "lt",
+  "value": "price"
+}
+```
+Fires when `rolling_max(bars.high, 10) < price`, i.e., price breaks above the recent range.
+
+**ATR-squeeze filter** — current ATR is below 77% of its 10-bar peak:
+```json
+{
+  "expression": { "type": "rolling_max", "indicator": "atr14", "periods": 10 },
+  "op": "gt",
+  "value": {
+    "type": "mul",
+    "left":  { "type": "number",    "value": 1.3 },
+    "right": { "type": "indicator", "name": "atr14" }
+  }
+}
+```
+Fires when `rolling_max(atr14, 10) > 1.3 * atr14`, i.e., current ATR is less than 77% of its recent peak (a volatility squeeze).
+
+---
 
 ### Usage in Conditions
 
-Expressions can be used in rule conditions to create complex entry/exit logic.
+Expressions are used inside an `ExpressionCondition` with `expression`, `op`, and `value` fields:
+
+```json
+{
+  "expression": <expression-node>,
+  "op": "gt|lt|ge|le|eq|ne",
+  "value": <number, indicator-name, or expression-node>
+}
+```
 
 **Example: RSI Slope Detection**
-
 ```json
 {
   "id": "rsi_rising",
   "intent": "open",
   "when": {
-    "left_expr": {
-      "operator": "sub",
-      "operands": [{ "indicator": "rsi14" }, { "indicator": "rsi14[1]" }]
+    "expression": {
+      "type": "sub",
+      "left": {"type": "indicator", "name": "rsi14"},
+      "right": {"type": "indicator", "name": "rsi14[1]"}
     },
     "op": "gt",
-    "right_value": 0
+    "value": 0
   }
 }
 ```
 
-**Example: Bollinger Band Compression**
-
+**Example: Bollinger Band Compression (current width < previous bar's width)**
 ```json
 {
   "id": "bb_squeeze",
   "intent": "open",
   "when": {
-    "left_expr": {
-      "operator": "sub",
-      "operands": [{ "indicator": "bb_upper" }, { "indicator": "bb_lower" }]
+    "expression": {
+      "type": "sub",
+      "left": {"type": "indicator", "name": "bb_upper"},
+      "right": {"type": "indicator", "name": "bb_lower"}
     },
     "op": "lt",
-    "right_expr": {
-      "operator": "average",
-      "operands": [
-        { "indicator": "bb_upper[1]" },
-        { "indicator": "bb_lower[1]" },
-        { "indicator": "bb_upper[2]" },
-        { "indicator": "bb_lower[2]" }
-      ]
+    "value": {
+      "type": "sub",
+      "left": {"type": "indicator", "name": "bb_upper[1]"},
+      "right": {"type": "indicator", "name": "bb_lower[1]"}
     }
   }
 }
@@ -740,7 +1282,6 @@ Expressions can be used in rule conditions to create complex entry/exit logic.
 Expressions enable **dynamic position sizing** based on market conditions, volatility, or indicator strength.
 
 **Example: Inverse ATR Sizing (Volatility-Adjusted)**
-
 ```json
 {
   "order": {
@@ -749,8 +1290,9 @@ Expressions enable **dynamic position sizing** based on market conditions, volat
       "mode": "notional_quote",
       "value": 1000,
       "expression": {
-        "operator": "div",
-        "operands": [{ "number": 1000 }, { "indicator": "atr14" }]
+        "type": "div",
+        "left": {"type": "number", "value": 1000},
+        "right": {"type": "indicator", "name": "atr14"}
       }
     }
   }
@@ -760,7 +1302,6 @@ Expressions enable **dynamic position sizing** based on market conditions, volat
 When ATR is high (volatile market), position size decreases. When ATR is low (quiet market), position size increases.
 
 **Example: Momentum-Based Sizing**
-
 ```json
 {
   "order": {
@@ -769,14 +1310,12 @@ When ATR is high (volatile market), position size decreases. When ATR is low (qu
       "mode": "notional_quote",
       "value": 500,
       "expression": {
-        "operator": "mul",
-        "operands": [
-          { "number": 500 },
-          {
-            "operator": "abs",
-            "operands": [{ "indicator": "macd_histogram" }]
-          }
-        ]
+        "type": "mul",
+        "left": {"type": "number", "value": 500},
+        "right": {
+          "type": "abs",
+          "expr": {"type": "indicator", "name": "macd_histogram"}
+        }
       }
     }
   }
@@ -788,60 +1327,56 @@ Position size scales with MACD histogram strength.
 ### Expression Examples
 
 **1. RSI Momentum (Rate of Change)**
-
 ```json
 {
-  "operator": "sub",
-  "operands": [{ "indicator": "rsi14" }, { "indicator": "rsi14[1]" }]
+  "type": "sub",
+  "left": {"type": "indicator", "name": "rsi14"},
+  "right": {"type": "indicator", "name": "rsi14[1]"}
 }
 ```
 
 **2. Dynamic Stop Distance (Multiple of ATR)**
-
 ```json
 {
-  "operator": "mul",
-  "operands": [{ "indicator": "atr14" }, { "number": 2.0 }]
+  "type": "mul",
+  "left": {"type": "indicator", "name": "atr14"},
+  "right": {"type": "number", "value": 2.0}
 }
 ```
 
 **3. Bollinger Band Width**
-
 ```json
 {
-  "operator": "sub",
-  "operands": [{ "indicator": "bb_upper" }, { "indicator": "bb_lower" }]
+  "type": "sub",
+  "left": {"type": "indicator", "name": "bb_upper"},
+  "right": {"type": "indicator", "name": "bb_lower"}
 }
 ```
 
 **4. Normalized Indicator (0-1 Range)**
-
 ```json
 {
-  "operator": "div",
-  "operands": [{ "indicator": "rsi14" }, { "number": 100 }]
+  "type": "div",
+  "left": {"type": "indicator", "name": "rsi14"},
+  "right": {"type": "number", "value": 100}
 }
 ```
 
-**5. Combined Indicator Strength**
-
+**5. Rolling Average of Indicator**
 ```json
 {
-  "operator": "average",
-  "operands": [
-    { "indicator": "rsi14" },
-    { "indicator": "stoch_k" },
-    { "indicator": "stochrsi" }
-  ]
+  "type": "average",
+  "indicator": "rsi14",
+  "periods": 3
 }
 ```
 
 **6. Price Distance from Moving Average**
-
 ```json
 {
-  "operator": "sub",
-  "operands": [{ "indicator": "price" }, { "indicator": "sma20" }]
+  "type": "sub",
+  "left": {"type": "indicator", "name": "price"},
+  "right": {"type": "indicator", "name": "sma20"}
 }
 ```
 
@@ -855,15 +1390,15 @@ Expression evaluation includes built-in safety checks:
 - **Fallback Values**: Uses `size.value` if expression evaluation fails
 
 **Example with Error Handling:**
-
 ```json
 {
   "size": {
     "mode": "notional_quote",
     "value": 1000,
     "expression": {
-      "operator": "div",
-      "operands": [{ "number": 1000 }, { "indicator": "atr14" }]
+      "type": "div",
+      "left": {"type": "number", "value": 1000},
+      "right": {"type": "indicator", "name": "atr14"}
     }
   }
 }
@@ -882,7 +1417,6 @@ If `atr14` is 0 or missing, the engine falls back to `value: 1000`.
 ### Complete Expression Examples
 
 See `examples/expressions/` directory for full strategy examples:
-
 - `rsi_slope.json` - RSI momentum detection
 - `inverse_atr_sizing.json` - Volatility-adjusted position sizing
 - `macd_histogram_sizing.json` - Momentum-based sizing
@@ -909,13 +1443,13 @@ Rules define the entry and exit logic for your strategy. Each rule specifies a c
 
 ### Rule Fields
 
-| Field        | Type   | Required | Description                                        |
-| ------------ | ------ | -------- | -------------------------------------------------- |
-| `id`         | string | ✓        | Unique identifier for this rule                    |
-| `intent`     | string | ✓        | "open" (enter position) or "close" (exit position) |
-| `when`       | object | ✓        | Condition that triggers the rule                   |
-| `order`      | object |          | Order specification (type and size)                |
-| `pyramiding` | object |          | Pyramiding/scaling configuration                   |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | ✓ | Unique identifier for this rule |
+| `intent` | string | ✓ | "open" (enter position) or "close" (exit position) |
+| `when` | object | ✓ | Condition that triggers the rule |
+| `order` | object | | Order specification (type and size) |
+| `pyramiding` | object | | Pyramiding/scaling configuration |
 
 ---
 
@@ -972,7 +1506,6 @@ Compare an indicator value against a fixed number:
 ```
 
 **Operators:**
-
 - `"lt"`: Less than (<)
 - `"le"`: Less than or equal (≤)
 - `"gt"`: Greater than (>)
@@ -1009,12 +1542,10 @@ Detect when one indicator crosses above or below another:
 ```
 
 **Cross Operators:**
-
 - `"crosses_above"`: Indicator crosses above the other (was below, now above)
 - `"crosses_below"`: Indicator crosses below the other (was above, now below)
 
 **Example:**
-
 ```json
 {
   "id": "golden_cross",
@@ -1078,7 +1609,6 @@ Reference previous indicator values using bracket notation `[n]` where `n` is th
 ```
 
 **Supported OHLC component references:**
-
 - `ohlc_m1.close` or `ohlc_m1_close`: Current close price
 - `ohlc_m1.close[1]` or `ohlc_m1_close[1]`: Previous bar's close price
 - `ohlc_m1.high[1]` or `ohlc_m1_high[1]`: Previous bar's high price
@@ -1087,14 +1617,11 @@ Reference previous indicator values using bracket notation `[n]` where `n` is th
 
 Both **dot notation** (`ohlc_m1.close`) and **underscore notation** (`ohlc_m1_close`) are supported and equivalent.
 
-**DEPRECATED:** The `close@M1[1]` syntax is deprecated. See [Deprecated Features](#deprecated-features).
-
 ##### Multi-Value Indicator Lookback
 
 All multi-value indicators support lookback on their individual components:
 
 **MACD:**
-
 ```json
 {
   "indicator": "macd_signal",
@@ -1102,13 +1629,11 @@ All multi-value indicators support lookback on their individual components:
   "other": "macd_signal[1]"
 }
 ```
-
 - `macd_macd[1]`: MACD line 1 bar ago
 - `macd_signal[1]`: Signal line 1 bar ago
 - `macd_histogram[1]`: Histogram 1 bar ago
 
 **StochRSI:**
-
 ```json
 {
   "indicator": "stochrsi_k",
@@ -1116,12 +1641,10 @@ All multi-value indicators support lookback on their individual components:
   "other": "stochrsi_k[1]"
 }
 ```
-
 - `stochrsi_k[1]`: %K line 1 bar ago
 - `stochrsi_d[1]`: %D line 1 bar ago
 
 **Stochastic:**
-
 ```json
 {
   "indicator": "stoch_k",
@@ -1129,12 +1652,10 @@ All multi-value indicators support lookback on their individual components:
   "other": "stoch_d"
 }
 ```
-
 - `stoch_k[1]`: %K line 1 bar ago
 - `stoch_d[1]`: %D line 1 bar ago
 
 **Bollinger Bands:**
-
 ```json
 {
   "indicator": "ohlc_m1.close",
@@ -1142,13 +1663,11 @@ All multi-value indicators support lookback on their individual components:
   "other": "bb_lower[1]"
 }
 ```
-
 - `bb_upper[1]`: Upper band 1 bar ago
 - `bb_middle[1]`: Middle band 1 bar ago
 - `bb_lower[1]`: Lower band 1 bar ago
 
 **OHLC Components:**
-
 ```json
 {
   "indicator": "ohlc_m1.close",
@@ -1156,14 +1675,12 @@ All multi-value indicators support lookback on their individual components:
   "other": "ohlc_m1.open"
 }
 ```
-
 - `ohlc_m1.open[1]` or `ohlc_m1_open[1]`: Open price 1 bar ago
 - `ohlc_m1.high[1]` or `ohlc_m1_high[1]`: High price 1 bar ago
 - `ohlc_m1.low[1]` or `ohlc_m1_low[1]`: Low price 1 bar ago
 - `ohlc_m1.close[1]` or `ohlc_m1_close[1]`: Close price 1 bar ago
 
 ##### Example - Rising RSI:
-
 ```json
 {
   "all": [
@@ -1182,7 +1699,6 @@ All multi-value indicators support lookback on their individual components:
 ```
 
 ##### Example - MACD Momentum Building:
-
 ```json
 {
   "all": [
@@ -1206,7 +1722,6 @@ All multi-value indicators support lookback on their individual components:
 ```
 
 ##### Example - Price Above Previous Swing High:
-
 ```json
 {
   "indicator": "ohlc_m1.close",
@@ -1253,7 +1768,7 @@ All conditions must be true (logical AND):
 
 At least one condition must be true (logical OR):
 
-````json
+```json
 {
   "any": [
     {
@@ -1262,7 +1777,45 @@ At least one condition must be true (logical OR):
       "value": 80
     },
     {
-      "indicator": "stoch.≤)
+      "indicator": "stoch.k",
+      "op": "gt",
+      "value": 90
+    }
+  ]
+}
+```
+
+---
+
+#### 7. Profit Condition
+
+Exit when position reaches a profit threshold, with support for percentage or absolute profit values and flexible comparison operators.
+
+**Structure:**
+```json
+{
+  "profit": {
+    "mode": "percent",     // "percent" | "absolute"
+    "value": 5.0,          // numeric threshold
+    "currency": "quote",   // "quote" | "asset" (optional, only for absolute mode)
+    "op": "ge"             // "gt" | "ge" | "lt" | "le" | "eq" | "ne" (optional, default: "ge")
+  }
+}
+```
+
+**Modes:**
+- `"percent"`: Profit percentage relative to entry price (e.g., 5.0 = 5%)
+- `"absolute"`: Absolute profit value in specified currency
+
+**Currency (for absolute mode):**
+- `"quote"`: Profit in quote currency (e.g., USD, USDC) - default
+- `"asset"`: Profit in asset units (e.g., ETH, BTC)
+
+**Comparison Operators:**
+- `"gt"`: Greater than (>)
+- `"ge"`: Greater than or equal (≥) - **default**
+- `"lt"`: Less than (<)
+- `"le"`: Less than or equal (≤)
 - `"eq"`: Equal (=)
 - `"ne"`: Not equal (≠)
 
@@ -1281,10 +1834,9 @@ At least one condition must be true (logical OR):
     }
   }
 }
-````
+```
 
 **Close when profit ≥ 5%:**
-
 ```json
 {
   "id": "take_profit_5pct",
@@ -1299,7 +1851,6 @@ At least one condition must be true (logical OR):
 ```
 
 **Close when profit in quote currency ≥ $100:**
-
 ```json
 {
   "id": "take_profit_100usd",
@@ -1315,7 +1866,6 @@ At least one condition must be true (logical OR):
 ```
 
 **Close when profit in asset units ≥ 0.1 ETH:**
-
 ```json
 {
   "id": "take_profit_01eth",
@@ -1331,7 +1881,6 @@ At least one condition must be true (logical OR):
 ```
 
 **Using with compound conditions (all/any):**
-
 ```json
 {
   "id": "conditional_exit",
@@ -1368,7 +1917,6 @@ Exit when position has been open for a specific duration:
 ```
 
 **Example - Exit after 5 minutes:**
-
 ```json
 {
   "id": "timed_exit",
@@ -1380,11 +1928,126 @@ Exit when position has been open for a specific duration:
 ```
 
 **Common Durations:**
-
 - 60 seconds = 1 minute
 - 300 seconds = 5 minutes
 - 3600 seconds = 1 hour
 - 86400 seconds = 1 day
+
+---
+
+#### 9. Time Range Condition
+
+Only fire during a specific UTC time window. Useful for restricting trades to exchange sessions (London, New York, Asian).
+
+```json
+{
+  "time_range": {
+    "start": "08:00",
+    "end":   "16:00"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `start` | string | Window start in `"HH:MM"` 24-hour UTC format (inclusive) |
+| `end` | string | Window end in `"HH:MM"` 24-hour UTC format (exclusive) |
+
+- `start` and `end` must differ.
+- Midnight crossover is supported: `start: "21:00", end: "05:00"` covers 21:00–05:00 UTC.
+- Evaluation uses the tick timestamp (`ctx.ts`), so results are deterministic during backtesting.
+
+**Example — London session only:**
+```json
+{
+  "id": "london_entry",
+  "intent": "open",
+  "when": {
+    "all": [
+      { "time_range": { "start": "08:00", "end": "16:00" } },
+      { "indicator": "ema20", "op": "crosses_above", "other": "ema50" }
+    ]
+  }
+}
+```
+
+**Example — Overnight session (midnight crossover):**
+```json
+{
+  "id": "overnight_exit",
+  "intent": "close",
+  "when": {
+    "time_range": { "start": "21:00", "end": "05:00" }
+  }
+}
+```
+
+**Common session windows (UTC):**
+| Session | Start | End |
+|---------|-------|-----|
+| Asian | `00:00` | `08:00` |
+| London | `08:00` | `16:00` |
+| New York | `14:00` | `21:00` |
+| London+NY overlap | `14:00` | `16:00` |
+
+---
+
+#### 10. Day of Week Condition
+
+Only fire on specific days of the week. Useful for avoiding low-liquidity weekends or Monday gaps.
+
+```json
+{
+  "day_of_week": [1, 2, 3, 4, 5]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `day_of_week` | array of integers | Allowed days: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday |
+
+- At least one day must be specified.
+- All values must be in the range 0–6.
+- Evaluation uses the tick timestamp (`ctx.ts`), matching `getDay()` convention from JavaScript.
+
+**Example — Weekdays only (avoid weekend volatility):**
+```json
+{
+  "id": "weekday_rsi_long",
+  "intent": "open",
+  "when": {
+    "all": [
+      { "day_of_week": [1, 2, 3, 4, 5] },
+      { "indicator": "rsi14", "op": "lt", "value": 30 }
+    ]
+  }
+}
+```
+
+**Example — Exclude Monday (skip first-day gaps):**
+```json
+{
+  "id": "no_monday_entry",
+  "intent": "open",
+  "when": {
+    "all": [
+      { "day_of_week": [0, 2, 3, 4, 5, 6] },
+      { "indicator": "ema20", "op": "gt", "other": "ema50" }
+    ]
+  }
+}
+```
+
+**Day reference:**
+| Day | Value |
+|-----|-------|
+| Sunday | `0` |
+| Monday | `1` |
+| Tuesday | `2` |
+| Wednesday | `3` |
+| Thursday | `4` |
+| Friday | `5` |
+| Saturday | `6` |
 
 ---
 
@@ -1407,34 +2070,30 @@ Define how orders are executed when a rule fires.
 
 #### Order Fields
 
-| Field  | Type   | Required | Description                                        |
-| ------ | ------ | -------- | -------------------------------------------------- |
-| `side` | string |          | Position side: "long" or "short"                   |
-| `type` | string | ✓        | Order type: "market" (more types may be supported) |
-| `size` | object |          | Order size specification                           |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `side` | string | | Position side: "long" or "short" |
+| `type` | string | ✓ | Order type: "market" (more types may be supported) |
+| `size` | object | | Order size specification |
 
 #### Size Modes
 
 ##### 1. `"all"` - Use all available capital/position
 
 **Entry (open):**
-
 ```json
 {
   "mode": "all"
 }
 ```
-
 Uses all available capital to open position.
 
 **Exit (close):**
-
 ```json
 {
   "mode": "all"
 }
 ```
-
 Closes entire position.
 
 ---
@@ -1447,35 +2106,28 @@ Closes entire position.
   "value": 1000
 }
 ```
-
 Opens position worth 1000 units of quote currency (e.g., $1000 USD, 1000 USDC).
-
-**Deprecated:** `"fixed_usd"` is deprecated but still supported as an alias for `"notional_quote"`.
 
 ---
 
 ##### 3. `"percent"` - Percentage of capital/position
 
 **Entry:**
-
 ```json
 {
   "mode": "percent",
   "value": 50
 }
 ```
-
 Uses 50% of available capital.
 
 **Exit:**
-
 ```json
 {
   "mode": "percent",
   "value": 50
 }
 ```
-
 Closes 50% of position.
 
 ---
@@ -1488,17 +2140,13 @@ Closes 50% of position.
   "value": 0.5
 }
 ```
-
 Buys/sells 0.5 units of the base asset (e.g., 0.5 ETH).
-
-**Deprecated:** `"fixed_asset"` and `"shares"` are deprecated but still supported as aliases for `"notional_base"`.
 
 ---
 
 #### Size Mode Examples
 
 **Entry with $1000 fixed amount:**
-
 ```json
 {
   "id": "rsi_entry",
@@ -1520,7 +2168,6 @@ Buys/sells 0.5 units of the base asset (e.g., 0.5 ETH).
 ```
 
 **Partial exit (50% of position):**
-
 ```json
 {
   "id": "partial_exit",
@@ -1542,7 +2189,6 @@ Buys/sells 0.5 units of the base asset (e.g., 0.5 ETH).
 ```
 
 **Full exit (close entire position):**
-
 ```json
 {
   "id": "full_exit",
@@ -1562,7 +2208,6 @@ Buys/sells 0.5 units of the base asset (e.g., 0.5 ETH).
 ```
 
 **Fixed quantity (always buy 0.1 ETH):**
-
 ```json
 {
   "id": "fixed_qty_entry",
@@ -1601,12 +2246,10 @@ Add to winning positions by allowing multiple entries:
 ```
 
 **Fields:**
-
 - `enabled`: true/false
 - `max_legs`: Maximum number of position entries allowed
 
 **Example:**
-
 ```json
 {
   "id": "scale_in_buy",
@@ -1667,11 +2310,9 @@ Specify the leverage multiplier for position sizing:
 ```
 
 **Fields:**
-
 - `leverage` (number): Leverage multiplier (e.g., 25 = 25x leverage)
 
 **Example:**
-
 ```json
 {
   "name": "leveraged_strategy",
@@ -1719,7 +2360,6 @@ Exit when position loses 5%.
 ```
 
 Exit when position loses $100 (in quote currency). The loss is calculated as:
-
 - `position_value = quantity × entry_price`
 - `current_value = quantity × current_price`
 - `loss = position_value - current_value`
@@ -1727,7 +2367,6 @@ Exit when position loses $100 (in quote currency). The loss is calculated as:
 When `loss >= value`, the stop loss triggers.
 
 **Use Cases:**
-
 - Fixed risk per trade regardless of position size
 - Dollar-based risk management
 - Consistent loss limits across different position sizes
@@ -1746,7 +2385,6 @@ When `loss >= value`, the stop loss triggers.
 ```
 
 **Fields:**
-
 - `mode`: "atr"
 - `value`: Multiplier for ATR value (1.5 = 1.5x ATR)
 - `atr_indicator`: Name of the ATR indicator to use (default: "atr")
@@ -1796,7 +2434,6 @@ Exit when position gains 10%.
 ```
 
 Exit when position profits $200 (in quote currency). The profit is calculated as:
-
 - `position_value = quantity × entry_price`
 - `current_value = quantity × current_price`
 - `profit = current_value - position_value`
@@ -1804,7 +2441,6 @@ Exit when position profits $200 (in quote currency). The profit is calculated as
 When `profit >= value`, the take profit triggers.
 
 **Use Cases:**
-
 - Fixed profit target per trade
 - Dollar-based profit goals
 - Consistent profit targets across different position sizes
@@ -1845,19 +2481,18 @@ Lock in profits by moving stop loss as position becomes profitable.
 
 #### Trailing Stop Fields
 
-| Field            | Type    | Description                                       |
-| ---------------- | ------- | ------------------------------------------------- |
-| `enabled`        | boolean | Enable trailing stop                              |
-| `start_mode`     | string  | When to activate: "atr" or "percent"              |
-| `start_value`    | number  | Activation threshold (e.g., 1.0 = profit ≥ 1×ATR) |
-| `distance_mode`  | string  | How to trail: "breakeven", "atr", or "percent"    |
-| `distance_value` | number  | Trail distance (0.0 for breakeven)                |
-| `atr_indicator`  | string  | ATR indicator name (default: "atr")               |
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | boolean | Enable trailing stop |
+| `start_mode` | string | When to activate: "atr" or "percent" |
+| `start_value` | number | Activation threshold (e.g., 1.0 = profit ≥ 1×ATR) |
+| `distance_mode` | string | How to trail: "breakeven", "atr", or "percent" |
+| `distance_value` | number | Trail distance (0.0 for breakeven) |
+| `atr_indicator` | string | ATR indicator name (default: "atr") |
 
 #### Trailing Stop Modes
 
 **1. Breakeven Trailing Stop**
-
 ```json
 {
   "trailing_stop": {
@@ -1869,11 +2504,9 @@ Lock in profits by moving stop loss as position becomes profitable.
   }
 }
 ```
-
 When profit ≥ 5%, move stop to breakeven (entry price).
 
 **2. ATR-based Trailing Stop**
-
 ```json
 {
   "trailing_stop": {
@@ -1886,11 +2519,9 @@ When profit ≥ 5%, move stop to breakeven (entry price).
   }
 }
 ```
-
 When profit ≥ 1×ATR, trail stop at 0.5×ATR below current price.
 
 **3. Percent-based Trailing Stop**
-
 ```json
 {
   "trailing_stop": {
@@ -1902,7 +2533,6 @@ When profit ≥ 1×ATR, trail stop at 0.5×ATR below current price.
   }
 }
 ```
-
 When profit ≥ 10%, trail stop at 3% below current price.
 
 ---
@@ -1922,7 +2552,6 @@ Prevent rapid re-entry after closing a position.
 Wait 300 seconds (5 minutes) before allowing new entry after position close.
 
 **Disable cooldown:**
-
 ```json
 {
   "cooldown": {
@@ -1957,7 +2586,6 @@ Limit the number of trades allowed within specific timeframes.
 ```
 
 **Supported Timeframes:**
-
 - `"M1"`: 1 minute
 - `"M5"`: 5 minutes
 - `"M15"`: 15 minutes
@@ -1975,7 +2603,6 @@ Per-bar limits enforce a logical AND across all configured timeframes. A trade i
 **Example Behavior:**
 
 With the configuration above:
-
 - If you've already placed 1 trade in the current minute, a second attempt in the same minute will be rejected (even if M5 and H1 limits aren't exceeded)
 - If you've placed 3 trades in the current 5-minute window, the next trade will be rejected until a new 5-minute bar starts
 - You can place at most 10 trades per hour regardless of minute/5-minute distribution
@@ -1994,933 +2621,20 @@ With the configuration above:
 // High-frequency with guardrails
 {
   "per_bar_limits": [
-    { "timeframe": "M1", "mak",
-      "op": "gt",
-      "value": 90
-    }
-  ]
-}
-```
-
----
-
-#### 7. Profit Condition
-
-Exit when position reaches a profit threshold, with support for percentage or absolute profit values and flexible comparison operators.
-
-**Structure:**
-
-```jsonx_trades": 3 },
+    { "timeframe": "M1", "max_trades": 3 },
     { "timeframe": "M5", "max_trades": 10 },
-
-{
-  "profit": {
-    "mode": "percent",     // "percent" | "absolute"
-    "value": 5.0,          // numeric threshold
-    "currency": "quote",   // "quote" | "asset" (optional, only for absolute mode)
-    "op": "ge"             // "gt" | "ge" | "lt" | "le" | "eq" | "ne" (optional, default: "ge")
-  }
-}
-```
-
-**Modes:**
-
-- `"percent"`: Profit percentage relative to entry price (e.g., 5.0 = 5%)
-- `"absolute"`: Absolute profit value in specified currency
-
-**Currency (for absolute mode):**
-
-- `"quote"`: Profit in quote currency (e.g., USD, USDC) - default
-- `"asset"`: Profit in asset units (e.g., ETH, BTC)
-
-**Comparison Operators:**
-
-- `"gt"`: Greater than (>)
-- `"ge"`: Greater than or equal (≥) - **default**
-- `"lt"`: Less than (<)
-- ` { "timeframe": "H1", "max_trades": 50 }
+    { "timeframe": "H1", "max_trades": 50 }
   ]
-  }
+}
 
 // Single timeframe (simplest)
 {
-"per_bar_limits": [
-{ "timeframe": "M15", "max_trades": 1 }
-]
-}
-
-````
-
-For detailed examples, see `examples/PER_BAR_LIMITS_README.md` and `examples/per_bar_limits_demo.rs`.
-
----
-
-## Complete Examples
-
-### Example 1: Simple RSI Strategy
-
-```json
-{
-  "name": "simple_rsi_strategy",
-  "symbol": "ETH/USDC",
-  "indicators": [
-    {
-      "type": "rsi",
-      "name": "rsi14",
-      "period": 14,
-      "timeframe": "M1"
-    }
-  ],
-  "rules": [
-    {
-      "id": "buy_oversold",
-      "intent": "open",
-      "when": {
-        "indicator": "rsi14",
-        "op": "lt",
-        "value": 30
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    },
-    {
-      "id": "sell_overbought",
-      "intent": "close",
-      "when": {
-        "indicator": "rsi14",
-        "op": "gt",
-        "value": 70
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    }
-  ],
-  "risk_manager": {
-    "stop_loss": {
-      "enabled": true,
-      "mode": "percent",
-      "value": 5.0
-    },
-    "take_profit": {
-      "enabled": true,
-      "mode": "percent",
-      "value": 10.0
-    }
-  }
-}
-````
-
----
-
-### Example 2: MACD Crossover with Multiple Conditions
-
-```json
-{
-  "name": "macd_crossover_strategy",
-  "symbol": "ETH/USDC",
-  "indicators": [
-    {
-      "type": "macd",
-      "name": "macd",
-      "timeframe": "M1",
-      "params": {
-        "fast_period": 12,
-        "slow_period": 26,
-        "signal_period": 9
-      }
-    }
-  ],
-  "rules": [
-    {
-      "id": "bullish_cross",
-      "intent": "open",
-      "when": {
-        "all": [
-          {
-            "indicator": "macd.macd",
-            "op": "crosses_above",
-            "other": "macd.signal"
-          },
-          {
-            "indicator": "macd.histogram",
-            "op": "gt",
-            "value": 0
-          }
-        ]
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    },
-    {
-      "id": "bearish_cross",
-      "intent": "close",
-      "when": {
-        "all": [
-          {
-            "indicator": "macd.macd",
-            "op": "crosses_below",
-            "other": "macd.signal"
-          },
-          {
-            "indicator": "macd.histogram",
-            "op": "lt",
-            "value": 0
-          }
-        ]
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    }
+  "per_bar_limits": [
+    { "timeframe": "M15", "max_trades": 1 }
   ]
 }
 ```
 
----
-
-### Example 3: Trend Following with ATR-based Risk
-
-````json
-{
-  "name": "trend_following_atr",
-  "symbol": "ETH/USDC",
-  "indicators": [
-    {
-      "type": "ema",
-      "name": "ema20",
-      "period": 20,
-      "timeframe": "M1"
-    },
-    {
-      "type": "ema",
-      "name": "ema50",
-      "period": 50,
-      "timeframe": "M1"
-    },
-    {
-      "type": "atr",
-      "name": "atr14",
-      "timeframe": "M1",
-      "params": {
-        "period": 14
-      }
-    }
-  ],
-  "rules": [
-    {
-      "id": "golden_cross",
-      "intent": "open",
-      "when": {
-        "indicator": "ema20",
-        "op": "crosses_above",
-        "other": "ema50"
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "percent",
-          "value": 100
-        }
-      }
-    },
-    {
-      "id": "death_cross",
-      "intent": "close",
-      "when": {
-        "indicator": "ema20",
-
-
-### Example 5: Scale-In Strategy with RSI
-
-```json
-{
-  "name": "scale_in_rsi_strategy",
-  "symbol": "ETH/USDC",
-  "indicators": [
-    {
-      "type": "rsi",
-      "name": "rsi14",
-      "period": 14,
-      "timeframe": "M1"
-    },
-    {
-      "type": "sm: "M1"
-    }
-  ],
-  "rules": [
-    {
-      "id": "scale_in_buy",
-      "intent": "open",
-      "when": {
-        "all": [
-          {
-            "indicator": "rsi14",
-            "op": "lt",
-            "value": 30
-          },
-          {
-            "indicator": "price",
-            "op": "lt",
-            "other": "sma20"
-          }
-        ]
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "notional_quote",
-          "value": 1000
-        }
-      },
-      "pyramiding": {
-        "enabled": true,
-        "max_legs": 5
-      }
-    },
-    {
-      "id": "exit_all",
-      "intent": "close",
-      "when": {
-        "indicator": "rsi14",
-        "op": "gt",
-        "value": 70
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    }
-  ],
-  "risk_manager": {
-    "stop_loss": {
-      "enabled": true,
-      "mode": "percent",
-      "value": 10.0
-    },
-    "take_profit": {
-      "enabled": true,
-      "mode": "percent",
-      "value": 10.0
-    }
-  }
-}
-````
-
----
-
-### Example 6: Multi-Timeframe Strategy
-
-```json
-{
-  "name": "multi_timeframe_strategy",
-  "symbol": "ETH/USDC",
-  "indicators": [
-    {
-      "type": "sma",
-      "name": "sma20_m1",
-      "period": 20,
-      "timeframe": "M1"
-    },
-    {
-      "type": "sma",
-      "name": "sma50_m5",
-      "period": 50,
-      "timeframe": "M5"
-    },
-    {
-      "type": "rsi",
-      "name": "rsi14_m15",
-      "period": 14,
-      "timeframe": "M15"
-    }
-  ],
-  "rules": [
-    {
-      "id": "multi_tf_buy",
-      "intent": "open",
-      "when": {
-        "all": [
-          {
-            "indicator": "price",
-            "op": "gt",
-            "other": "sma20_m1"
-          },
-          {
-            "indicator": "price",
-            "op": "gt",
-            "other": "sma50_m5"
-          },
-          {
-            "indicator": "rsi14_m15",
-            "op": "gt",
-            "value": 50
-          }
-        ]
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    },
-    {
-      "id": "multi_tf_sell",
-      "intent": "close",
-      "when": {
-        "indicator": "rsi14_m15",
-        "op": "lt",
-        "value": 40
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    }
-  ],
-  "risk_manager": {
-    "per_bar_limits": [
-      {
-        "timeframe": "M1",
-        "max_trades": 1
-      }
-    ]
-  }
-}
-```
-
----
-
-### Example 7: External Signal Strategy (AI/ML)
-
-````json
-{
-  "name": "ai_signal_strategy",
-  "symbol": "BTC/USDC",
-  "indicators": [
-    {
-      "type": "rsi",
-      "name": "rsi14",
-      "period": 14,
-      "timeframe": "M1"
-    }
-  ],
-  "rules": [
-    {
-      "id": "ai_buy_signal",
-      "intent": "open",
-      "when": {
-        "all": [
-          {
-            "signal_name"a",
-      "name": "sma20",
-      "period": 20,
-      "timeframe"     "op": "crossute",
-    }
-  }
-}
-```. This provides consistent dollar-based risk/reward ratios.
-
----
-
-This strategy risks $250 and targets $500 profit on each trade, regardless of the exact position size or BTC price   "value": 250.0
-    },
-    "take_profit": {
-      "enabled": true,: "AI_SIGNAL",
-            "op": "==",
-            "value": "BUY
-      "mode": "absolute",
-      "value": 500.0
-   es_below",
-        "other": "ema50"
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-          "mode": "all""
-          },
-          {
-            "signal_name": "AI_CONFID
-        }
-      }
-    }
-  ],
-  "risk_manager": {
-    "stop_loss": {
-      "enabled": true,
-      "mode": "absol }
-      }
-    }
-  ],
-  "risk_manager": {
-    "stop_loss": {
-      "order": {
-        "type": "market",
-        "size": {
-         "enabled": true,
-      "mode": "atr",
-      "value": 1.5,
-      "atr_indicator": "atr14"
-    },
-    "take_profit": {
-      "enabled": true,
-      "mode": "atr",
-      "value": 2.5,: "rsi14",
-        "op": "gt",
-        "value": 60ENCE",
-            "op": ">=",
-            "value": "0.8"
-          }
-        ]
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "notional_quote",
-          "value": 2000
-        }
-      }
-    },
-    {
-      "id": "ai_sell_signal",
-      "intent": "close",
-      "when": {
-        "all": [
-          {
-            "signal_name": "AI_SIGNAL",
-            "op": "==",
-            "value": "SELL"
-          },
-          {
-            "signal_name": "AI_CONFIDENCE",
-            "op": ">=",
-            "value": "0.8"
-          }
-        ]
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    }
-  ]
-}
-````
-
----
-
-### Example 8: Bollinger Bands Breakout
-
-```json
-{
-  "name": "bollinger_breakout",
-  "symbol": "ETH/USDC",
-  "indicators": [
-    {
-      "type": "bollinger",
-      "name": "bb",
-      "timeframe": "M1",
-      "params": {
-        "period": 20,
-        "std_dev": 2.0
-      }
-    },
-    {
-      "type": "stochrsi",
-      "name": "stochrsi",
-      "timeframe": "M1",
-      "params": {
-        "rsi_period": 14,
-        "stoch_period": 14,
-        "k_period": 3,
-        "d_period": 3
-      }
-    }
-  ],
-  "rules": [
-    {
-      "id": "bb_lower_bounce",
-      "intent": "open",
-      "when": {
-        "all": [
-          {
-            "indicator": "price",
-            "op": "lt",
-            "other": "bb.lower"
-          },
-          {
-            "indicator": "stochrsi_k",
-            "op": "lt",
-            "value": 20
-          }
-        ]
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    },
-    {
-      "id": "bb_upper_sell",
-      "intent": "close",
-      "when": {
-        "all": [
-          {
-            "indicator": "price",
-            "op": "gt",
-            "other": "bb.upper"
-          },
-          {
-            "indicator": "stochrsi_k",
-            "op": "gt",
-            "value": 80
-          }
-        ]
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    }
-  ],
-  "risk_manager": {
-    "per_bar_limits": [
-      {
-        "timeframe": "M1",
-        "max_trades": 1
-      }
-    ]
-  }
-}
-```
-
----
-
-### Example 9: Timed Exit Strategy
-
-```json
-{
-  "name": "timed_exit_strategy",
-  "symbol": "BTC/USDC",
-  "indicators": [
-    {
-      "type": "rsi",
-      "name": "rsi14",
-      "period": 14,
-      "timeframe": "M1"
-    }
-  ],
-  "rules": [
-    {
-      "id": "rsi_entry",
-      "intent": "open",
-      "when": {
-        "indicator": "rsi14",
-        "op": "lt",
-        "value": 30
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "notional_quote",
-          "value": 1000
-        }
-      }
-    },
-    {
-      "id": "timed_exit_5min",
-      "intent": "close",
-      "when": {
-        "position_age_secs": 300
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-        }
-      }
-    },
-    {
-      "id": "rsi_exit",
-      "intent": "close",
-      "when": {
-        "indicator": "rsi14",
-        "op": "gt",
-        "value": 70
-      },
-      "order": {
-        "type": "market",
-        "size": {
-          "mode": "all"
-
-      },
-
-      "atr_indicator": "atr14"
-    },
-    "tra}
-      }
-    }
-  ],
-  "risk_manager": {
-    "cooldown": {
-     iling_stop": {
-      "enabled": true,
-      "start_mode": "atr",
-      "start_value": 1.0,
-      "distance_mode": "breakeven",
-      "distance_value": 0.0,
-      "atr_indicator": "atr14"
-    }
-  }
-}
-```
-
----
-
-### Example 4: Fixed Dollar Risk with Absolute Values
-
-```json
-{
-  "name": "fixedt",
-      "intent": "close",
-      "when": {
-        "indicator"_risk_strategy",
-  "symbol": "BTC/USDC",
-  "indicators": [
-    {
-      "type": "rsi",
-      "name": "rsi14",
-      "period": 14,
-      "   "value": 5000
-        }
-      }
-    },
-    {
-      "id": "exitimeframe": "M1"
-    },
-    {
-      "type": "sma",
-      "name": "sma50",
-      "period": 50,
-      "timeframe": "M1"
-    }
-  ],
-  "rules": [",
-        "size": {
-          "mode": "notional_quote",
-
-    {
-      "id": "entry",
-      "intent": "open",
-      "when": {
-        "all": [
-          {
-            "indicator": "rsi14",
-            "op": "lt",
-            "value": 40
-          },
-          {
-            "indicator": "price",
-            "op": "gt",
-            "other": "sma50"
-          }
-        ]
-      },
-      "entry_secs": 60
-    }
-  }
-}
-```
-
----
-
-## Deprecated Features
-
-This section documents features that are still supported for bac "order": {
-"type": "market"le"`: Less than or equal (kward compatibility but are **deprecated** and should be avoided in new strategies.
-
-### 1. OHLC Component Names Without Indicators (DEPRECATED)
-
-**Deprecated Usage:**
-
-```json
-{
-  "indicator": "close",
-  "op": "gt",
-  "other": "sma20"
-}
-```
-
-**Problem:** Using `"close"`, `"open"`, `"high"`, `"low"` directly as indicator names without defining an OHLC indicator makes strategies less explicit and harder to understand. It also prevents accessing historical price data with lookback.
-
-**Important:** This deprecation applies ONLY to `"close"`, `"open"`, `"high"`, `"low"`. The `"price"` indicator is **NOT deprecated** and is the recommended way to reference the current live market price. See [Current Price Reference](#current-price-reference) for details.
-
-**Recommended Replacement:**
-
-For bar/candle-based strategies with lookback, define an OHLC indicator:
-
-```json
-{
-  "indicators": [
-    {
-      "type": "ohlc",
-      "name": "ohlc_m1",
-      "period": 1,
-      "timeframe": "M1",
-      "params": {}
-    }
-  ],
-  "rules": [
-    {
-      "id": "close_above_sma",
-      "intent": "open",
-      "when": {
-        "indicator": "ohlc_m1.close",
-        "op": "gt",
-        "other": "sma20"
-      }
-    }
-  ]
-}
-```
-
-For simple current price comparisons, use `"price"`:
-
-```json
-{
-  "id": "price_above_sma",
-  "intent": "open",
-  "when": {
-    "indicator": "price",
-    "op": "gt",
-    "other": "sma20"
-  }
-}
-```
-
-**Benefits of OHLC Indicators:**
-
-- Explicit timeframe specification
-- Access to all OHLC components (open, high, low, close, volume)
-- Full lookback support: `ohlc_m1.close[1]`, `ohlc_m1.high[2]`, etc.
-- Consistent with other indicator usage patterns
-
-**Benefits of "price" Indicator:**
-
-- Simple current market price reference
-- No indicator definition required
-- Clear intent for live price comparisons
-
----
-
-### 2. @Timeframe Lookback Syntax (DEPRECATED)
-
-**Deprecated Usage:**
-
-```json
-{
-  "indicator": "close@M1",
-  "op": "gt",
-  "other": "high@M5[1]"
-}
-```
-
-**Problem:** The `indicator@TF[N]` syntax is inconsistent with how other indicators work and makes strategies harder to read. It bypasses the indicator system, preventing proper tracking and debugging.
-
-**Recommended Replacement:**
-
-```json
-{
-  "indicators": [
-    {
-      "type": "ohlc",
-      "name": "ohlc_m1",
-      "period": 1,
-      "timeframe": "M1",
-      "params": {}
-    },
-    {
-      "type": "ohlc",
-      "name": "ohlc_m5",
-      "period": 1,
-      "timeframe": "M5",
-      "params": {}
-    }
-  ],
-  "rules": [
-    {
-      "id": "multi_tf_breakout",
-      "intent": "open",
-      "when": {
-        "indicator": "ohlc_m1.close",
-        "op": "gt",
-        "other": "ohlc_m5.high[1]"
-      }
-    }
-  ]
-}
-```
-
-**Benefits:**
-
-- Indicators are explicitly declared and visible in the strategy configuration
-- Consistent dot/underscore notation for all components
-- Better error messages when indicators are not defined
-- Easier to debug and understand strategy logic
-
----
-
-### 3. profit_pct Condition (DEPRECATED)
-
-**Deprecated Usage:**
-
-````json
-{
-  "when": {
-    "profit_pct": 10.0
-  }Migration Guide
-
-When updating old strategies to use the recommended patterns:
-
-1. **Add OHLC"ohlc",
-     "name": "ohlc_m1",
-     "period": 1,
-     "timeframe": "M1",
-     "params": {}
-   }
-   ```"`, `"ohlc_m1.open"`, etc.
-
-3. **Replace @timeframe syntax** (`"high@M5[1]"`) with OHLC indicator references (`"ohlc_m5.high[1]"`)
-
-4. **Update profit_pct** to use the new `profit` condition format
-
-5. **Test thoroughly** after migration to ensure behavior remains unchanged
 
 ---
 
@@ -2994,6 +2708,16 @@ Quick reference for accessing indicator outputs in rules:
 | Stochastic | `stoch_k`, `stoch_d` | `stoch.k`, `stoch.d` |
 | Bollinger Bands | `bb_upper`, `bb_middle`, `bb_lower` | `bb.upper`, `bb.middle`, `bb.lower` |
 | ATR | `atr14` | Single value |
+| ADX | `adx14_adx`, `adx14_plus_di`, `adx14_minus_di` | `adx14.adx`, `adx14.plus_di`, `adx14.minus_di` |
+| SuperTrend | `st_value`, `st_direction` | `st.value`, `st.direction` |
+| Donchian Channel | `dc20_upper`, `dc20_lower`, `dc20_middle` | `dc20.upper`, `dc20.lower`, `dc20.middle` |
+| Keltner Channel | `kc_upper`, `kc_middle`, `kc_lower` | `kc.upper`, `kc.middle`, `kc.lower` |
+| Parabolic SAR | `sar_value`, `sar_direction` | `sar.value`, `sar.direction` |
+| Ichimoku Cloud | `ich_tenkan`, `ich_kijun`, `ich_span_a`, `ich_span_b`, `ich_chikou` | `ich.tenkan`, `ich.kijun`, `ich.span_a`, `ich.span_b`, `ich.chikou` |
+| Heikin-Ashi | `ha_open`, `ha_high`, `ha_low`, `ha_close` | `ha.open`, `ha.high`, `ha.low`, `ha.close` |
+| Linear Regression | `lr14_slope`, `lr14_value` | `lr14.slope`, `lr14.value` |
+| CCI | `cci20` | Single value |
+| Z-Score | `z20` | Single value |
 
 ### Formation Indicators
 
@@ -3002,46 +2726,11 @@ Quick reference for accessing indicator outputs in rules:
 | **Renko** | `renko_10.brick_high` | High price of current brick |
 | | `renko_10.brick_low` | Low price of current brick |
 | | `renko_10.direction` | 1 (up), -1 (down), 0 (none) |
-| | `renko_10.brick_count` | Total
-
-2. **Replace direct price references** (`"close"`, `"open"`, etc.) with `"ohlc_m1.close indicators** to your `indicators` array for each timeframe you need:
-   ```json
-   {
-     "type":
-}
-``` 10.0fit Condition](#7-profit-condition) for full details.
-
----
-
-### , bricks formed |
-| | `renko_10.is_new_brick` | 1 if new brick ju
-  Currency selection (quote or asset) for absolute mode
-
-See [Pro     "op": "ge"ion supports:
-- Multiple comparison operators (`gt`, `ge`, `lt`, `le`, `eq`, `ne`)
-- Both percentage and absolute profit modes
--
-    }
-  }
-}
-````
-
-st formed |
+| | `renko_10.brick_count` | Total bricks formed |
+| | `renko_10.is_new_brick` | 1 if new brick just formed |
 | | `renko_10.brick_size` | Configured brick size |
-
-The new `profit` condit
-
-**Problem:** Limited to percentage-based profit checks with only `>=` comparison.
-
-**Recommended Replacement:**
-
-```json
-{
-  "when": {
-    "profit": {
 | **RenkoATR** | Same as Renko | ATR-adaptive brick sizing |
-| *      "mode": "percent",
-   *OHLC** | `ohlc_m5.open` or `ohlc_m5_open` | Opening price of candle |
+| **OHLC** | `ohlc_m5.open` or `ohlc_m5_open` | Opening price of candle |
 | | `ohlc_m5.high` or `ohlc_m5_high` | High price of candle |
 | | `ohlc_m5.low` or `ohlc_m5_low` | Low price of candle |
 | | `ohlc_m5.close` or `ohlc_m5_close` | Closing price of candle |
@@ -3049,74 +2738,28 @@ The new `profit` condit
 
 **Note:** All formation indicators support **both dot notation** (`.`) and **underscore notation** (`_`) interchangeably. For example, `ohlc_m5.close` and `ohlc_m5_close` are equivalent. Lookback also works: `ohlc_m5.close[1]` or `ohlc_m5_close[1]`.
 
-### Built-in Price Values (DEPRECATED)
-
-**These are deprecated. Use OHLC indicators instead.**
-
-| Name | Description | Replacement |
-|------|-------------|-------------|
-| `close` | Current closing price | Define `ohlc_m1` and use `ohlc_m1.close` |
-| `open` | Current opening price | Define `ohlc_m1` and use `ohlc_m1.open` |
-| `high` | Current high price | Define `ohlc_m1` and use `ohlc_m1.high` |
-| `low` | Current low price | Define `ohlc_m1` and use `ohlc_m1.low` |
-
-See [Deprecated Features](#deprecated-features) for migration guide.
-
 ---
 
-## Additional Resources
-
-### Documentation
-- **Renko & OHLC**: See `examples/RENKO_OHLC_README.md` for detailed Renko and OHLC documentation
-- **Size Modes**: See `examples/size-modes/README.md` for position sizing strategies
-- **External Signals**: See [EXTERNAL_SIGNALS_API.md](EXTERNAL_SIGNALS_API.md) for AI integration and external data sources
-- **Per-Bar Limits**: See `examples/PER_BAR_LIMITS_README.md` for rate limiting examples
-- **Profit Conditions**: See `examples/PROFIT_CONDITION_README.md` for profit-based exits
-
-### Example Strategies
-- **Expressions**: `examples/expressions/` - Dynamic calculations and complex logic
-- **Indicators**: `examples/indicators-showcase/` - Showcase of all indicator types
-- **Notifications**: `examples/notifs/` - Production notification strategies
-- **Scale-In**: `examples/scale-in/` - Pyramiding and accumulation strategies
-- **Size Modes**: `examples/size-modes/` - Different position sizing approaches
-- **OHLC Bars**: `examples/ohlc-bars/` - Multi-timeframe bar-based strategies
-- **Renko**: `examples/renko/` - Renko brick trading strategies
-- **Risk Management**: `examples/risk/` - Stop loss and take profit examples
-- **External Signals**: See [EXTERNAL_SIGNALS_API.md](EXTERNAL_SIGNALS_API.md)
-
-### Source Code
-- **Strategy Parser**: `src/dsl_json.rs` and `src/strategy_parser.rs`
-- **Indicator Adapter**: `src/indicator_adapter.rs`
-- **Indicator Parameters**: `src/indicator_params.rs`
-- **Engine Processor**: `src/engine_processor.rs`
-
-### Testing & Running
-- **Production Mode**: `cargo run --example all_strategies_prod -- examples/input/ticks.json console`
-- **With Redis Backend**: `cargo run --example all_strategies_prod -- examples/input/ticks.json both:log.txt --backend=redis://127.0.0.1:6379`
-- **Individual Strategy**: Most examples have their own dedicated `.rs` files
-
----
 
 ## Feature Summary
 
 ### Supported Features
 
-✅ **Indicators**: RSI, SMA, EMA, MACD, StochRSI, Stochastic, Bollinger Bands, ATR, Renko, RenkoATR, OHLC
-✅ **Expressions**: Dynamic calculations with 10 operators (add, sub, mul, div, abs, neg, average, min, max)
-✅ **Conditions**: Simple comparison, compound (all/any), crosses, profit-based, position age, expressions
-✅ **Dynamic Sizing**: Expression-based position sizing for volatility-adjusted and momentum-based sizing
-✅ **Size Modes**: all, notional_quote, notional_base, percent (deprecated: fixed_usd, fixed_asset, shares)
-✅ **Risk Management**: Stop loss, take profit, trailing stop, cooldown, per-bar limits
-✅ **Pyramiding**: Scale-in with max_legs configuration
-✅ **External Signals**: See [EXTERNAL_SIGNALS_API.md](EXTERNAL_SIGNALS_API.md) for AI/ML integration
-✅ **Multi-Timeframe**: Support for M1, M5, M15, M30, H1, H4, D1
-✅ **Lookback**: Historical bar access with `[N]` syntax (e.g., `ohlc_m5.high[1]`)
-✅ **Price Reference**: Use `"price"` for current market price
-✅ **Order Logging**: JSON order files with P&L tracking per trade
-✅ **State Persistence**: Redis and local file backends
+✅ **Indicators**: RSI, SMA, EMA, MACD, StochRSI, Stochastic, Bollinger Bands, ATR, Renko, RenkoATR, OHLC  
+✅ **Expressions**: Dynamic calculations with operators: add, sub, mul, div, abs, neg, average, min, max, rolling_max, rolling_min  
+✅ **Conditions**: Simple comparison, compound (all/any), crosses, profit-based, position age, expressions  
+✅ **Dynamic Sizing**: Expression-based position sizing for volatility-adjusted and momentum-based sizing  
+✅ **Size Modes**: all, notional_quote, notional_base, percent  
+✅ **Risk Management**: Stop loss, take profit, trailing stop, cooldown, per-bar limits  
+✅ **Pyramiding**: Scale-in with max_legs configuration  
+✅ **External Signals**: See [EXTERNAL_SIGNALS_API.md](EXTERNAL_SIGNALS_API.md) for AI/ML integration  
+✅ **Multi-Timeframe**: Support for M1, M5, M15, M30, H1, H4, D1  
+✅ **Lookback**: Historical bar access with `[N]` syntax (e.g., `ohlc_m5.high[1]`)  
+✅ **Price Reference**: Use `"price"` for current market price  
+✅ **Order Logging**: JSON order files with P&L tracking per trade  
+✅ **State Persistence**: Redis and local file backends  
 
 ---
 
-**Version:** 2.0
-**Last Updated:** December 2025   "value":
-```
+**Version:** 3.0  
+**Last Updated:** April 2026
