@@ -571,6 +571,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       positionQty: Type.Optional(Type.Number({ description: "Updated settlement position quantity" })),
       slippage: Type.Optional(Type.Number({ description: "Updated settlement slippage tolerance" })),
       expiration: Type.Optional(Type.Number({ description: "Updated settlement transaction expiration in seconds" })),
+      isPrivate: Type.Optional(Type.Boolean({ description: 'Change agent visibility. false makes a private agent public (irreversible). Setting true on an already-public agent is rejected with 400. Copy agents can never be made public.' })),
     }),
     async execute(
       _id: string,
@@ -601,6 +602,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         positionQty?: number;
         slippage?: number;
         expiration?: number;
+        isPrivate?: boolean;
       },
     ) {
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
@@ -628,6 +630,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "positionQty",
         "slippage",
         "expiration",
+        "isPrivate",
       ].filter((field) => hasOwnField(params, field));
 
       if (requestedFields.length === 0) {
@@ -966,6 +969,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (hasOwnField(params, "buyLimit")) body.buyLimit = params.buyLimit;
         if (hasOwnField(params, "protocol")) body.protocol = params.protocol;
         if (settlementConfigPayload) body.settlement_config = settlementConfigPayload;
+        if (hasOwnField(params, "isPrivate")) body.isPrivate = params.isPrivate;
 
         debugLog("update_agent", "trading-data.req", { url: `${baseUrl}/api/agent`, body, hasBillingHeaders: Object.keys(billingHeaders).length > 0 });
         const res = await fetch(`${baseUrl}/api/agent`, {
@@ -1096,12 +1100,17 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       debugLog("setup_live_wallet", "entry", { masterWalletAddress: params.masterWalletAddress, network: params.network ?? "testnet" });
       const result: Record<string, unknown> = {};
 
-      // Step 1: Store in TEE
+      // Step 1: Prepare encryption payload for wallet-agent delegation
+      // (trading-data forwards to wallet-agent TEE when delegateToWalletAgent is true)
       let agentWalletAddress: string;
+      let walletAgentPublicKey = "";
+      let teeEncryptedPrivateKey = "";
+      let walletAgentSignedAt = 0;
       try {
         const pubKeyRes = await fetch(`${walletAgentUrl}/pubkey`);
         if (!pubKeyRes.ok) throw new Error(`Failed to get wallet-agent pubkey: ${pubKeyRes.status}`);
         const { publicKey: walletAgentPubKey } = await pubKeyRes.json();
+        walletAgentPublicKey = walletAgentPubKey;
 
         const ephemeralKey = Keys.generatePrivateKey();
         const ephemeralPubKey = Keys.getPublicKey(ephemeralKey);
@@ -1110,57 +1119,15 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           walletAgentPubKey,
           params.ethAgentPrivateKey,
         );
-        const encryptedPrivateKey = `${encrypted}&pbk=02${ephemeralPubKey}`;
+        teeEncryptedPrivateKey = `${encrypted}&pbk=02${ephemeralPubKey}`;
+        walletAgentSignedAt = Math.floor(Date.now() / 1000);
 
-        const signedAt = Math.floor(Date.now() / 1000);
-        const body = {
-          npub,
-          public_key: walletAgentPubKey,
-          encrypted_private_key: encryptedPrivateKey,
-          signed_at: signedAt,
-        };
-        const signature = Signer.getSignature(body, privateKey, {
-          npub: "string",
-          public_key: "string",
-          encrypted_private_key: "string",
-          signed_at: "number",
-        } as const);
+        // Derive the agent wallet address locally from the private key
+        const ethWallet = new Wallet("0x" + params.ethAgentPrivateKey);
+        agentWalletAddress = ethWallet.address;
+        debugLog("setup_live_wallet", "prepare.delegation", { agentWalletAddress, walletAgentPublicKey });
 
-        debugLog("setup_live_wallet", "api.req wallet-agent/wallets", { npub, public_key: walletAgentPubKey, signed_at: signedAt });
-        const res = await fetch(`${walletAgentUrl}/wallets`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-public-key": publicKey,
-            "x-signature": signature,
-          },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-
-        if (res.ok) {
-          agentWalletAddress = data.eth_address ?? data.address;
-          debugLog("setup_live_wallet", "api.res wallet-agent/wallets", { status: res.status, agentWalletAddress });
-        } else if (data?.code === "WALLET_EXISTS") {
-          const match = data.error?.match(/(0x[0-9a-fA-F]{40})/);
-          if (match) {
-            agentWalletAddress = match[1];
-          } else {
-            const listRes = await fetch(`${walletAgentUrl}/wallets/${npub}`, {
-              headers: { "x-public-key": publicKey },
-            });
-            const listData = await listRes.json();
-            const wallets = listData.wallets || [];
-            agentWalletAddress = wallets[wallets.length - 1]?.eth_address;
-          }
-          if (!agentWalletAddress) throw new Error("No wallets found for this npub");
-          debugLog("setup_live_wallet", "api.res wallet-agent/wallets", { status: res.status, agentWalletAddress, walletExists: true });
-        } else {
-          debugLog("setup_live_wallet", "api.res wallet-agent/wallets", { status: res.status, error: data });
-          throw new Error(`TEE storage failed: ${res.status} ${JSON.stringify(data)}`);
-        }
-
-        result.teeStorage = { ok: true, agentWalletAddress };
+        result.teeStorage = { ok: true, agentWalletAddress, delegated: true };
       } catch (e: any) {
         result.teeStorage = { ok: false, error: e.message };
         debugLog("setup_live_wallet", "result", result);
@@ -1215,6 +1182,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           walletType: "hyperliquid_agent",
           masterWalletAddress: params.masterWalletAddress,
           hyperliquidNetwork: params.network ?? "testnet",
+          delegateToWalletAgent: true,
+          walletAgentPublicKey,
+          encryptedPrivateKey: teeEncryptedPrivateKey,
+          walletAgentSignedAt,
         };
         debugLog("setup_live_wallet", "api.req POST /api/wallets", registerBody);
         const res = await fetch(`${baseUrl}/api/wallets`, {
@@ -1537,6 +1508,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
       chainId: Type.Optional(Type.Number({ description: "Network chain ID for both paper and live modes (e.g. Hyperliquid: 998/999, EVM: 1/56)." })),
       leverage: Type.Optional(Type.Number({ description: "Leverage multiplier" })),
+      isPrivate: Type.Optional(Type.Boolean({ description: 'When true, the agent is private and excluded from the public leaderboard. Defaults to false (public). Once an agent is public it cannot be made private again. Copy agents are always private.' })),
     }),
     async execute(
       _id: string,
@@ -1553,6 +1525,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         symbol?: string;
         chainId?: number;
         leverage?: number;
+        isPrivate?: boolean;
       },
     ) {
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
@@ -1800,6 +1773,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (settlementConfig) payload.settlement_config = settlementConfig;
         payload.delegateToTradingBot = true;
         if (isLive) payload.delegateToSettlement = true;
+        if (hasOwnField(params, "isPrivate")) payload.isPrivate = params.isPrivate;
 
         debugLog("deploy_agent", "create.api.req POST /api/agent", payload);
         const res = await fetch(`${baseUrl}/api/agent`, {
@@ -2597,21 +2571,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const signedAt = Math.floor(Date.now() / 1000);
       debugLog("delete_wallet", "entry", { walletAddress: params.walletAddress });
 
-      // Step 1: Remove from wallet-agent (TEE)
-      try {
-        const body = { wallet_address: params.walletAddress, signed_at: signedAt };
-        const res = await fetch(`${walletAgentUrl}/wallets/${params.walletAddress}`, {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        debugLog("delete_wallet", "tee.res", { status: res.status });
-        result.tee = { ok: res.ok };
-      } catch (e: any) {
-        result.tee = { ok: false, error: e.message };
-      }
-
-      // Step 2: Remove from trading-data
+      // Remove from trading-data (delegateToWalletAgent instructs server to also remove from TEE)
       try {
         const createdAt = signedAt;
         const sigData = { created_at: createdAt, wallet_address: params.walletAddress, action: "disconnected", npub };
@@ -2621,7 +2581,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         const res = await fetch(`${baseUrl}/api/wallets`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json", Authorization: auth },
-          body: JSON.stringify({ npub, walletAddress: params.walletAddress, signature, createdAt, agents: [] }),
+          body: JSON.stringify({ npub, walletAddress: params.walletAddress, signature, createdAt, agents: [], delegateToWalletAgent: true, walletAgentSignedAt: signedAt }),
         });
         debugLog("delete_wallet", "trading-data.res", { status: res.status });
         result.tradingData = { ok: res.ok };
