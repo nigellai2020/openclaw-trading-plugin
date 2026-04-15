@@ -71,8 +71,8 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 
 | Tool                  | Description                           |
 | --------------------- | ------------------------------------- |
-| `create_backtest`     | Submit a backtest job; if the user mentions a timezone, OpenClaw should resolve it before calling the tool, otherwise naive dates/times fall back to the OpenClaw runtime timezone, then UTC. If `startTime` and/or `endTime` are omitted, the plugin defaults to a rolling 30-day window |
-| `get_backtests`       | List backtests for an agent           |
+| `create_backtest`     | Submit a strategy-based backtest job; if the user mentions a timezone, OpenClaw should resolve it before calling the tool, otherwise naive dates/times fall back to the OpenClaw runtime timezone, then UTC. If `startTime` and/or `endTime` are omitted, the plugin defaults to a rolling 30-day window |
+| `get_backtests`       | List manual backtests for the authenticated user |
 | `get_backtest_job`    | Poll backtest job progress and status |
 | `get_backtest_result` | Get completed backtest results        |
 

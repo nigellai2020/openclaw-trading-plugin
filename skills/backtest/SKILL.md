@@ -1,9 +1,9 @@
 ---
 name: backtest
-description: Run a backtest for a trading agent. Use when the user wants to backtest a strategy, test historical performance, or run a simulation on past data. Guides through key setup, agent selection, parameter configuration, submission, and status checking.
+description: Run a manual backtest from either an existing agent or an inline strategy. Use when the user wants to backtest a strategy, test historical performance, or run a simulation on past data. Guides through key setup, strategy sourcing, parameter configuration, submission, and status checking.
 ---
 
-# Backtest Agent Strategy
+# Backtest Strategy
 
 Follow these steps to run a backtest.
 
@@ -13,9 +13,17 @@ Call `init_trading_session` with mode `"paper"`. Handle the response:
 
 - **keys.generated = true**: Inform the user a new Nostr identity was created.
 
-## Step 2 — Identify the agent
+## Step 2 — Choose the strategy source
 
-If the user specified an agent ID, use it. Otherwise ask the user for the agent ID. Call `get_agent` to fetch the agent details (name, strategy, capital).
+There are two valid paths:
+
+- **Existing agent path**: If the user specified an agent ID, or explicitly wants to backtest an existing agent, use `get_agent` to fetch the agent details (name, strategy, capital).
+- **Manual strategy path**: If the user already provided a strategy, or wants to build/test a strategy without tying it to an agent, do **not** ask for an agent ID.
+
+If neither an agent nor a strategy is available, ask the user whether they want to:
+
+- backtest an existing agent, or
+- backtest a standalone strategy
 
 ## Step 3 — Set backtest parameters
 
@@ -34,18 +42,24 @@ Ask the user for:
   - If the user gives an explicit numeric offset in the timestamp itself, preserve it and still pass `timeZone` if the user also named the timezone separately.
   - If the user gives no timezone signal at all, pass the date/datetime as given; `create_backtest` will fall back to the OpenClaw runtime timezone, and then to `UTC` if runtime resolution fails.
   - If the user gives an ambiguous abbreviation like `EST`, `CST`, or `PST`, ask them to clarify instead of guessing.
-- **Initial capital**: or default to the agent's existing capital
+- **Initial capital**
+  - If using the existing agent path and the user does **not** override it, default to the agent's existing capital.
+  - If using the manual strategy path and the user does **not** provide it, ask for it. Do **not** invent an agent just to get capital.
 - **Protocol fee** (optional): fee override
 - **Gas fee** (optional): fee override
 
 ## Step 4 — Optionally override strategy
 
-If the user wants to test a different strategy, build a new one (indicators, rules, risk_manager). For detailed schema references, see the `strategy-reference` skill. Otherwise use the agent's existing strategy.
+- If using the existing agent path and the user wants to test a different strategy, build a new one (indicators, rules, risk_manager). For detailed schema references, see the `strategy-reference` skill.
+- If using the existing agent path and the user does **not** want to override strategy, use the agent's existing strategy.
+- If using the manual strategy path, use the provided strategy. If the strategy is incomplete, help the user finish it before submission.
 
 ## Step 5 — Confirm before submitting
 
-Present a summary: agent name/ID, initial capital, fees (if any), strategy (existing or override), and the resolved time interpretation.
+Present a summary: backtest source, initial capital, fees (if any), strategy, and the resolved time interpretation.
 
+- If using the existing agent path, include agent name/ID and whether the strategy is the agent's current strategy or an override.
+- If using the manual strategy path, explicitly say this is a standalone manual backtest and no agent will be submitted.
 - If the user did not provide a time range, explicitly say the default rolling 30-day window will be used and show that interpreted range.
 - If the user mentioned a timezone phrase, explicitly say which timezone OpenClaw resolved, and show the interpreted local range in a human-readable format like `2026-03-20 00:00:00 (+08:00)`, not raw ISO strings.
 - If the user gave explicit timezone offsets, say those exact times will be preserved.
@@ -54,8 +68,9 @@ Present a summary: agent name/ID, initial capital, fees (if any), strategy (exis
 
 ## Step 6 — Submit the backtest
 
-Call `create_backtest` with agentId, initialCapital, optional startTime, optional endTime, optional `timeZone`, and optional protocolFee, gasFee, strategy.
+Call `create_backtest` with `strategy`, `initialCapital`, optional `startTime`, optional `endTime`, optional `timeZone`, and optional `protocolFee` and `gasFee`.
 
+- Never pass `agentId` to `create_backtest`. If the user started from an existing agent, extract and reuse its strategy/capital, but submit a manual backtest payload.
 - If OpenClaw resolved a timezone phrase from the user, pass offset-bearing ISO strings plus the resolved `timeZone`.
 - If there was no timezone phrase, pass the user's naive value and let the tool apply runtime-timezone fallback.
 - If the user did not provide a range, omit `startTime` and `endTime` so the tool applies the default rolling 30-day window.
@@ -107,4 +122,4 @@ Only poll if the user explicitly wants continued checking after the Step 6 ackno
 
 ## Step 8 — Show backtest history
 
-Call `get_backtests` with the agentId to list past backtests for context.
+Call `get_backtests` with no parameters to list the user's past manual backtests for context. Treat this as user-scoped manual history, not agent-specific history.

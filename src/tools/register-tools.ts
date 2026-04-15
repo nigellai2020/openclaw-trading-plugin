@@ -2667,12 +2667,12 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
   api.registerTool({
     name: "create_backtest",
     description:
-      "Create a new backtest job for an agent. " +
+      "Create a new backtest job from an inline strategy. " +
       "If the user mentions a timezone, OpenClaw should resolve it before calling the tool. " +
       "If `startTime` and/or `endTime` are omitted, the plugin defaults to a rolling 30-day window.",
     parameters: Type.Object({
-      agentId: Type.Number({ description: "Agent ID to backtest" }),
       initialCapital: Type.Number({ description: "Initial capital amount" }),
+      strategy: Strategy,
       startTime: Type.Optional(Type.Union([
         Type.String({
           description:
@@ -2701,19 +2701,17 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       ),
       protocolFee: Type.Optional(Type.Number({ description: "Protocol fee override" })),
       gasFee: Type.Optional(Type.Number({ description: "Gas fee override" })),
-      strategy: Type.Optional(Strategy),
     }),
     async execute(
       _id: string,
       params: {
-        agentId: number;
         initialCapital: number;
+        strategy: Record<string, unknown>;
         startTime?: string | number;
         endTime?: string | number;
         timeZone?: string;
         protocolFee?: number;
         gasFee?: number;
-        strategy?: Record<string, unknown>;
       },
     ) {
       const { privateKey, publicKey } = loadKeys(pluginConfig);
@@ -2727,7 +2725,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         params.timeZone,
       );
       debugLog("create_backtest", "normalized-range", {
-        agentId: params.agentId,
         timeZoneSource: normalizedRange.timeZoneSource,
         timeZoneUsed: normalizedRange.timeZoneUsed,
         input: {
@@ -2742,14 +2739,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       });
 
       const payload: Record<string, unknown> = {
-        agentId: params.agentId,
         initialCapital: params.initialCapital,
+        strategy: params.strategy,
         startTime: normalizedRange.startTime,
         endTime: normalizedRange.endTime,
       };
       if (params.protocolFee != null) payload.protocolFee = params.protocolFee;
       if (params.gasFee != null) payload.gasFee = params.gasFee;
-      if (params.strategy) payload.strategy = params.strategy;
 
       const res = await fetch(`${baseUrl}/api/backtest`, {
         method: "POST",
@@ -2820,15 +2816,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "get_backtests",
-    description: "List backtests for an agent",
-    parameters: Type.Object({
-      agentId: Type.Number({ description: "Agent ID" }),
-    }),
-    async execute(_id: string, params: { agentId: number }) {
+    description: "List manual backtests for the authenticated user",
+    parameters: Type.Object({}),
+    async execute(_id: string) {
       const { privateKey, publicKey } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
 
-      const res = await fetch(`${baseUrl}/api/backtests/${params.agentId}`, {
+      const res = await fetch(`${baseUrl}/api/backtests`, {
         headers: { Authorization: auth },
       });
       if (!res.ok) throw new Error(`get_backtests failed: ${res.status}`);
