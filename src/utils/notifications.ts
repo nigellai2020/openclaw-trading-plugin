@@ -13,8 +13,9 @@ export function formatBacktestSummary(event: any): string[] {
   const TG_LIMIT = 4096;
   const fmt = (n: any) => n == null ? "N/A" : `${Math.round(n * 10000) / 100}%`;
 
+  const hasMetrics = (p: any) => p.has_trades !== false && p.total_return != null;
   const scored = agents.map((a: any) => {
-    const trading = (a.periods || []).filter((p: any) => p.has_trades && p.total_return != null);
+    const trading = (a.periods || []).filter(hasMetrics);
     const avg = trading.length
       ? trading.reduce((s: number, p: any) => s + p.total_return, 0) / trading.length
       : null;
@@ -35,7 +36,7 @@ export function formatBacktestSummary(event: any): string[] {
     const lines = [`<b>${name}</b>:`];
     for (const p of periods) {
       const period = `<b>${escapeHtml(p.period)}</b>`;
-      if (p.has_trades) {
+      if (hasMetrics(p)) {
         lines.push(`  ${period}: Ret ${fmt(p.total_return)}, DD ${fmt(p.max_drawdown)}, WR ${fmt(p.win_rate)}`);
       } else {
         lines.push(`  ${period}: no trade`);
