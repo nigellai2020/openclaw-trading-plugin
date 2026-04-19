@@ -29,7 +29,7 @@ export function formatBacktestSummary(event: any): string[] {
     .sort((a: any, b: any) => String(a.agent_name || "").localeCompare(String(b.agent_name || "")));
   const ordered = [...withTrades, ...noTrades];
 
-  const header = `<b>[Backtest Summary] ${escapeHtml(scheduled_at)}</b>`;
+  const header = `<b>[Auto Backtest Summary] ${escapeHtml(scheduled_at)}</b>`;
   const blocks = ordered.map((a: any) => {
     const periods = a.periods || [];
     const name = escapeHtml(a.agent_name || "Unknown Agent");

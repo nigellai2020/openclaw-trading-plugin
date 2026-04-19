@@ -45,7 +45,7 @@ test("formatBacktestSummary ranks winners first, no-trades last, collapses no-tr
   assert.ok(Array.isArray(out));
   assert.equal(out.length, 1);
   const msg = out[0];
-  assert.ok(msg.startsWith("<b>[Backtest Summary] 2026-04-19</b>"));
+  assert.ok(msg.startsWith("<b>[Auto Backtest Summary] 2026-04-19</b>"));
 
   const winIdx = msg.indexOf("<b>WinAgent</b>:");
   const lossIdx = msg.indexOf("<b>LossAgent</b>:");
