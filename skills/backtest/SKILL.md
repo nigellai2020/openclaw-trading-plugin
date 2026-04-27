@@ -103,7 +103,13 @@ Only poll if the user explicitly wants continued checking after the Step 6 ackno
 
 - If the user does not ask to keep checking, stop after the submission response.
 - If the user wants a status update, call `get_backtest_job` with the jobId to poll its progress and status.
-- If status is **Completed**: call `get_backtest_result` with the jobId and present a summary including portfolio value, return %, win rate, max drawdown, Sharpe ratio, and trade count.
+- If status is **Completed**:
+  - If the user has not specified how to view the result (e.g. they asked "show the backtest result"), ask them first: "Do you want me to (1) list the full backtest detail here, or (2) give you a link to view it on the agent page?"
+  - For "detail": call `get_backtest_result` with `mode: "detail"` (and `agentId` if known from context, so the response can include a link to offer as a follow-up). Present a summary (portfolio value, return %, win rate, max drawdown, Sharpe ratio, trade count) and then the trade list. If the trade list is long, split it across multiple chat messages.
+  - For "link": call `get_backtest_result` with `mode: "link"` and `agentId`. If you don't already know `agentId` from context (e.g. the user came in with just a jobId and no agent), ask: "Which agent does this backtest belong to?" before calling. Present the returned `link`, and include a hint based on what you know about the backtest:
+    - Auto backtest: "Open the agent page and select the Backtest tab to see this run."
+    - Manual backtest: "Open the agent page, click the Backtest button — your manual backtests are listed in the modal. (Only you can see them; the link isn't useful to share.)"
+  - If the response includes a `note` saying agentId was missing, fall through to the detail presentation and re-ask the user for the agent.
 - If the job is not completed, respond with this user-facing shape, omitting the `Progress` line if unavailable:
   ```text
   Status: <status>

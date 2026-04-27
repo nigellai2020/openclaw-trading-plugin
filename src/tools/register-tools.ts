@@ -17,7 +17,7 @@ import { CopyTradeOrderConfig, SimulationConfig, SimulationConfigPatch, Strategy
 import { registerFillNotifications } from "./register-fill-notifications.js";
 import type { EthHeaders, PreparedAgentCreationContext } from "../types/billing.js";
 import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
-import { sanitizeBacktestResultResponse } from "../utils/backtest-result.js";
+import { sanitizeBacktestResultResponse, WEB_URL } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
 import { deriveDefaultLiveBuyLimit, fetchEvmWalletBalances, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
@@ -1749,7 +1749,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         }
         const data = await res.json();
         agentId = data.agentId;
-        agentUrl = `https://agent.openswap.xyz/trading-agents/${publicKey}/${agentId}`;
+        agentUrl = `${WEB_URL}/trading-agents/${publicKey}/${agentId}`;
         debugLog("deploy_agent", "create.api.res", { status: res.status, body: data });
         result.create = { ok: true, agentId, agentUrl, createdAt: creationTimestamp };
       } catch (e: any) {
@@ -2794,19 +2794,31 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "get_backtest_result",
-    description: "Get the full result of a completed backtest job (portfolio, metrics, trades)",
+    description:
+      "Get the result of a completed backtest job. " +
+      "Mode 'detail' returns portfolio, metrics, and trades. " +
+      "Mode 'link' returns only a URL to the agent's page on agent.openswap.xyz (requires agentId).",
     parameters: Type.Object({
       jobId: Type.String({ description: "Backtest job ID" }),
+      mode: Type.Optional(Type.Union([
+        Type.Literal("detail"),
+        Type.Literal("link"),
+      ], { default: "detail", description: "'detail' returns portfolio, metrics, and all trades. 'link' returns only a URL to the backtest's agent page on agent.openswap.xyz." })),
+      agentId: Type.Optional(Type.Number({ description: "Agent ID. Required when mode is 'link'. Pass the agent the backtest belongs to (taken from conversation context or asked from the user)." })),
     }),
-    async execute(_id: string, params: { jobId: string }) {
-      const { privateKey, publicKey } = loadKeys(pluginConfig);
+    async execute(_id: string, params: { jobId: string; mode?: "detail" | "link"; agentId?: number }) {
+      const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
       const res = await fetch(`${baseUrl}/api/backtest-job/${params.jobId}/result`, {
         headers: { Authorization: auth },
       });
       const body = await res.json();
       if (!res.ok) throw new Error(`get_backtest_result failed: ${res.status} ${responseErrorMessage(body)}`);
-      return textResult(sanitizeBacktestResultResponse(body, params.jobId));
+      return textResult(sanitizeBacktestResultResponse(body, params.jobId, {
+        mode: params.mode,
+        npub,
+        agentId: params.agentId,
+      }));
     },
   });
 
