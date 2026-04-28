@@ -129,3 +129,12 @@ Only poll if the user explicitly wants continued checking after the Step 6 ackno
 ## Step 8 — Show backtest history
 
 Call `get_backtests` with no parameters to list the user's past manual backtests for context. Treat this as user-scoped manual history, not agent-specific history.
+
+## Viewing an existing agent's auto backtest result
+
+If the user asks for the backtest result of a top/leaderboard agent (e.g. "show the 1m backtest result of the top agent"), do **not** start a new manual backtest. The auto runs are already accessible:
+
+1. Call `backtest_leader_board` with the requested `period` (and `limit: 1` if they only want the top agent). Each entry includes a `job_id` — that is the agent's auto backtest jobId for that period.
+2. Pass that `job_id` and the entry's `agent_id` to `get_backtest_result`. Use the same Step-7 `mode` flow: ask "detail or link?" if the user did not specify.
+
+The same applies when the user names an agent and you can resolve its leaderboard entry for the period — pull the `job_id` from there rather than asking the user for one.

@@ -2828,7 +2828,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     name: "backtest_leader_board",
     description:
       "Get the backtest leaderboard showing top-performing agents ranked by return percentage. " +
-      "Specify a period (1d, 1w, 1m) and optional limit.",
+      "Specify a period (1d, 1w, 1m) and optional limit. " +
+      "Each entry includes the agent's `job_id` for that period's auto backtest — pass it to `get_backtest_result` to fetch the full run detail.",
     parameters: Type.Object({
       period: Type.Union([
         Type.Literal("1d"),
