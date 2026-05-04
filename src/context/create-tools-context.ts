@@ -1,4 +1,4 @@
-import { Nip19, Signer } from "@scom/scom-signer";
+import { Keys, Nip19, Signer } from "@scom/scom-signer";
 import { Contract, JsonRpcProvider, Wallet, getAddress } from "ethers";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -273,7 +273,13 @@ export function createToolsContext(api: any) {
   }
 
   async function fetchPublicAgentProfile(agentId: number): Promise<any> {
-    const res = await fetch(`${baseUrl}/api/agent/${agentId}`);
+    const privateKey = pluginConfig.nostrPrivateKey;
+    const auth = typeof privateKey === "string" && privateKey.trim()
+      ? getAuthHeader(Keys.getPublicKey(privateKey), privateKey)
+      : undefined;
+    const res = await fetch(`${baseUrl}/api/agent/${agentId}`, auth
+      ? { headers: { Authorization: auth } }
+      : undefined);
     const body = await parseResponseBody(res);
     if (!res.ok) {
       throw new Error(`get_agent failed: ${res.status} ${responseErrorMessage(body)}`);
