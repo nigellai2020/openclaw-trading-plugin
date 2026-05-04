@@ -480,7 +480,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       agentId: Type.Number({ description: "Agent ID to retrieve" }),
     }),
     async execute(_id: string, params: { agentId: number }) {
-      const res = await fetch(`${baseUrl}/api/agent/${params.agentId}`);
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const res = await fetch(`${baseUrl}/api/agent/${params.agentId}`, {
+        headers: { Authorization: auth },
+      });
       if (!res.ok) throw new Error(`get_agent failed: ${res.status}`);
       return textResult(await res.json());
     },
@@ -612,7 +616,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       try {
         const [settings, publicAgentRes] = await Promise.all([
           fetchAgentSettingsForUpdate(auth, params.agentId),
-          fetch(`${baseUrl}/api/agent/${params.agentId}`)
+          fetch(`${baseUrl}/api/agent/${params.agentId}`, {
+            headers: { Authorization: auth },
+          })
             .then(async (res) => await parseResponseBody(res))
             .catch(() => null),
         ]);
@@ -944,7 +950,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       try {
         const [verifySettings, verifyAgent] = await Promise.all([
           fetchAgentSettingsForUpdate(auth, params.agentId),
-          fetch(`${baseUrl}/api/agent/${params.agentId}`).then(async (res) => await parseResponseBody(res)),
+          fetch(`${baseUrl}/api/agent/${params.agentId}`, {
+            headers: { Authorization: auth },
+          }).then(async (res) => await parseResponseBody(res)),
         ]);
         result.verify = {
           ok: true,
@@ -1792,7 +1800,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       // Step 3: Verify
       try {
-        const res = await fetch(`${baseUrl}/api/agent/${agentId}`);
+        const res = await fetch(`${baseUrl}/api/agent/${agentId}`, {
+          headers: { Authorization: auth },
+        });
         const verifyBody = await res.json().catch(() => null);
         debugLog("deploy_agent", "verify.api.res GET /api/agent", { status: res.status, body: verifyBody });
         if (res.ok) {
@@ -2411,7 +2421,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // Step 7: Verify agent
       try {
         const [agentRes, settingsRes] = await Promise.all([
-          fetch(`${baseUrl}/api/agent/${copiedAgentId}`),
+          fetch(`${baseUrl}/api/agent/${copiedAgentId}`, {
+            headers: { Authorization: auth },
+          }),
           fetch(`${baseUrl}/api/agent/settings/${copiedAgentId}`, {
             headers: { Authorization: auth },
           }),
@@ -2522,7 +2534,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       debugLog("delete_agent", "entry", { agentId: params.agentId });
 
       // Fetch agent to determine mode
-      const agentRes = await fetch(`${baseUrl}/api/agent/${params.agentId}`);
+      const agentRes = await fetch(`${baseUrl}/api/agent/${params.agentId}`, {
+        headers: { Authorization: auth },
+      });
       if (!agentRes.ok) return textResult({ error: `Agent ${params.agentId} not found: ${agentRes.status}` });
       const agentData = await agentRes.json();
       const isLive = agentData?.data?.mode === "live";
