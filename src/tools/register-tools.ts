@@ -1413,8 +1413,53 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       result.billingWallet = preparedContext.prepared.wallet;
       result.nft = preparedContext.prepared.nft;
       result.fees = preparedContext.prepared.fees;
+      if (preparedContext.prepared.subscription) {
+        result.subscription = preparedContext.prepared.subscription;
+      }
+      if (preparedContext.prepared.funding) {
+        result.funding = preparedContext.prepared.funding;
+      }
       if (preparedContext.prepared.gas) {
         result.gas = preparedContext.prepared.gas;
+      }
+
+      const walletAddress = preparedContext.prepared.wallet.address;
+      const tokenSymbol = preparedContext.prepared.wallet.tokenSymbol ?? "OSWAP";
+      const oswapShortfall = Number(preparedContext.prepared.fees.oswapShortfall ?? "0");
+      const bnbShortfall = Number(preparedContext.prepared.funding?.bnbShortfall ?? "0");
+      const totalBnbNeeded = preparedContext.prepared.funding?.totalBnbNeeded;
+      const bnbForGas = preparedContext.prepared.funding?.bnbForGas;
+
+      if (walletAddress) {
+        result.billingFundingHint =
+          oswapShortfall > 0
+            ? {
+                fundingAsset: "BNB",
+                amountToDeposit: bnbShortfall > 0
+                  ? preparedContext.prepared.funding?.bnbShortfall ?? totalBnbNeeded ?? "0"
+                  : "0",
+                amountNeededTotal: totalBnbNeeded ?? null,
+                reason:
+                  `Your billing wallet does not have enough ${tokenSymbol}. Deposit BNB to ${walletAddress} and OpenClaw will swap part of it into ${tokenSymbol} and use the rest for gas.`,
+                billingWalletAddress: walletAddress,
+              }
+            : bnbShortfall > 0
+              ? {
+                  fundingAsset: "BNB",
+                  amountToDeposit: preparedContext.prepared.funding?.bnbShortfall ?? totalBnbNeeded ?? "0",
+                  amountNeededTotal: totalBnbNeeded ?? null,
+                  reason:
+                    `Your billing wallet already has enough ${tokenSymbol}, but it still needs BNB for gas before OpenClaw can complete the setup.`,
+                  billingWalletAddress: walletAddress,
+                }
+              : {
+                  fundingAsset: tokenSymbol,
+                  amountToDeposit: "0",
+                  amountNeededTotal: totalBnbNeeded ?? null,
+                  reason:
+                    `Your billing wallet already has the required ${tokenSymbol} and BNB balances for this setup.`,
+                  billingWalletAddress: walletAddress,
+                };
       }
 
       result.defaults = {
@@ -1442,6 +1487,12 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         billingActions: preparedContext.prepared.executionPlan.actions,
         approvals: preparedContext.prepared.executionPlan.approvals,
         depositToVault: preparedContext.prepared.executionPlan.depositToVault,
+        billingWalletAddress: preparedContext.prepared.wallet.address ?? null,
+        billingVaultAddress: preparedContext.prepared.wallet.vaultAddress ?? null,
+        billingTokenAddress: preparedContext.prepared.wallet.tokenAddress ?? null,
+        billingTokenSymbol: preparedContext.prepared.wallet.tokenSymbol ?? null,
+        billingBnbForGas: bnbForGas ?? null,
+        billingTotalBnbNeeded: totalBnbNeeded ?? null,
         actions: effectiveMode === "live"
           ? [
               "Create the copied live agent via POST /api/copy-agent (with delegateToTradingBot + delegateToSettlement for automatic syncing).",
