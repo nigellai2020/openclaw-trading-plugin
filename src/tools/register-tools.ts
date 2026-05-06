@@ -1413,8 +1413,53 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       result.billingWallet = preparedContext.prepared.wallet;
       result.nft = preparedContext.prepared.nft;
       result.fees = preparedContext.prepared.fees;
+      if (preparedContext.prepared.subscription) {
+        result.subscription = preparedContext.prepared.subscription;
+      }
+      if (preparedContext.prepared.funding) {
+        result.funding = preparedContext.prepared.funding;
+      }
       if (preparedContext.prepared.gas) {
         result.gas = preparedContext.prepared.gas;
+      }
+
+      const walletAddress = preparedContext.prepared.wallet.address;
+      const tokenSymbol = preparedContext.prepared.wallet.tokenSymbol ?? "OSWAP";
+      const oswapShortfall = Number(preparedContext.prepared.fees.oswapShortfall ?? "0");
+      const bnbShortfall = Number(preparedContext.prepared.funding?.bnbShortfall ?? "0");
+      const totalBnbNeeded = preparedContext.prepared.funding?.totalBnbNeeded;
+      const bnbForGas = preparedContext.prepared.funding?.bnbForGas;
+
+      if (walletAddress) {
+        result.billingFundingHint =
+          oswapShortfall > 0
+            ? {
+                fundingAsset: "BNB",
+                amountToDeposit: bnbShortfall > 0
+                  ? preparedContext.prepared.funding?.bnbShortfall ?? totalBnbNeeded ?? "0"
+                  : "0",
+                amountNeededTotal: totalBnbNeeded ?? null,
+                reason:
+                  `Your billing wallet does not have enough ${tokenSymbol}. Deposit BNB to ${walletAddress} and OpenClaw will swap part of it into ${tokenSymbol} and use the rest for gas.`,
+                billingWalletAddress: walletAddress,
+              }
+            : bnbShortfall > 0
+              ? {
+                  fundingAsset: "BNB",
+                  amountToDeposit: preparedContext.prepared.funding?.bnbShortfall ?? totalBnbNeeded ?? "0",
+                  amountNeededTotal: totalBnbNeeded ?? null,
+                  reason:
+                    `Your billing wallet already has enough ${tokenSymbol}, but it still needs BNB for gas before OpenClaw can complete the setup.`,
+                  billingWalletAddress: walletAddress,
+                }
+              : {
+                  fundingAsset: tokenSymbol,
+                  amountToDeposit: "0",
+                  amountNeededTotal: totalBnbNeeded ?? null,
+                  reason:
+                    `Your billing wallet already has the required ${tokenSymbol} and BNB balances for this setup.`,
+                  billingWalletAddress: walletAddress,
+                };
       }
 
       result.defaults = {
@@ -1442,6 +1487,12 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         billingActions: preparedContext.prepared.executionPlan.actions,
         approvals: preparedContext.prepared.executionPlan.approvals,
         depositToVault: preparedContext.prepared.executionPlan.depositToVault,
+        billingWalletAddress: preparedContext.prepared.wallet.address ?? null,
+        billingVaultAddress: preparedContext.prepared.wallet.vaultAddress ?? null,
+        billingTokenAddress: preparedContext.prepared.wallet.tokenAddress ?? null,
+        billingTokenSymbol: preparedContext.prepared.wallet.tokenSymbol ?? null,
+        billingBnbForGas: bnbForGas ?? null,
+        billingTotalBnbNeeded: totalBnbNeeded ?? null,
         actions: effectiveMode === "live"
           ? [
               "Create the copied live agent via POST /api/copy-agent (with delegateToTradingBot + delegateToSettlement for automatic syncing).",
@@ -2843,7 +2894,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     description:
       "Get the backtest leaderboard showing top-performing agents ranked by return percentage. " +
       "Specify a period (1d, 1w, 1m) and optional limit. " +
-      "Each entry includes the agent's `job_id` for that period's auto backtest — pass it to `get_backtest_result` to fetch the full run detail.",
+      "Each entry includes the leaderboard agent ID as `agent_id` (also mirrored as `agentId`) and the auto-backtest job ID as `job_id` (also mirrored as `jobId`). " +
+      "When presenting leaderboard results, always include the agent ID next to the agent name so the user can refer to a specific agent in follow-up requests. " +
+      "Pass the job ID to `get_backtest_result` to fetch the full run detail.",
     parameters: Type.Object({
       period: Type.Union([
         Type.Literal("1d"),
@@ -2857,7 +2910,34 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const res = await fetch(`${baseUrl}/api/backtest-leaderboard?period=${params.period}&limit=${limit}`);
       const body = await res.json();
       if (!res.ok) throw new Error(`backtest_leader_board failed: ${res.status} ${responseErrorMessage(body)}`);
-      return textResult(body);
+
+      const rows = Array.isArray(body?.data) ? body.data : [];
+      const data = rows.map((row: any) => {
+        if (typeof row !== "object" || row === null) return row;
+
+        return {
+          ...row,
+          agentId:
+            typeof row.agentId === "number"
+              ? row.agentId
+              : typeof row.agent_id === "number"
+                ? row.agent_id
+                : undefined,
+          jobId:
+            typeof row.jobId === "string"
+              ? row.jobId
+              : typeof row.job_id === "string"
+                ? row.job_id
+                : undefined,
+        };
+      });
+
+      return textResult({
+        ...body,
+        data,
+        presentationHint:
+          "When listing leaderboard results, include each agent's ID together with the name, for example: Agent 3027 - Trend Follower.",
+      });
     },
   });
 

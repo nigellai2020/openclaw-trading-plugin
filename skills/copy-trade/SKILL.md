@@ -36,7 +36,12 @@ Handle the response:
 - Use `sourceAgent.name`, `sourceAgent.marketType`, `defaults.symbol`, `defaults.chainId` as the copy defaults.
 - Use the billing preflight returned by `prepare_copy_agent`:
   - If `billing.required = false`, say no upfront billing setup is required.
-  - If `billing.required = true`, present the returned billing, NFT, fee, gas, and funding details before deployment, following the same style used in the normal `trade` flow.
+  - If `billing.required = true`, present the returned billing, NFT, fee, gas, subscription, and funding details before deployment, following the same style used in the normal `trade` flow.
+  - Always show the full billing wallet address from `billingWallet.address` on its own line. Never truncate or abbreviate it.
+  - Always show the full vault address from `billingWallet.vaultAddress` when mentioning vault approval or deposit.
+  - If `fees.oswapShortfall > 0`, tell the user to deposit BNB into the billing wallet, not OSWAP by default. State the amount to top up as `billingFundingHint.amountToDeposit` BNB, and explain that OpenClaw will swap part of that BNB into OSWAP and use the rest for gas.
+  - If `fees.oswapShortfall = 0` and `funding.bnbShortfall > 0`, tell the user they already have enough OSWAP and only need to top up BNB for gas.
+  - If both shortfalls are zero, say the billing wallet is already funded and ask for confirmation directly.
 - Do **not** ask the user for market type or strategy.
 
 ## Step 3 — Wallet selection (live mode only)
@@ -103,6 +108,19 @@ Present a summary:
 - whether upfront billing setup is required
 
 When showing the selected wallet or master wallet, never use a table or ellipsis. Show full monospace addresses on their own lines.
+When showing the billing wallet, never use a table or ellipsis. Show the full address on its own line.
+
+If billing is required and funding is still needed, follow this format instead of an ambiguous checklist:
+
+- State clearly whether the user must top up **BNB** or can proceed with existing balances.
+- If `fees.oswapShortfall > 0`, say: the billing wallet currently has insufficient OSWAP, so the user should deposit approximately `billingFundingHint.amountToDeposit` BNB to the billing wallet. Mention that OpenClaw will convert part of it into OSWAP automatically.
+- If `fees.oswapShortfall = 0`, say existing OSWAP covers the billing amount and mention only the required BNB gas top-up if any.
+- Show these full copyable lines:
+  - `Billing wallet: <full billingWallet.address>`
+  - `Network: <billingWallet.networkLabel>`
+  - `OSWAP token: <full billingWallet.tokenAddress>`
+  - `Billing vault: <full billingWallet.vaultAddress>`
+- Avoid phrasing like `8 OSWAP deposit into billing vault` without first saying whether the user needs to deposit BNB or already has enough OSWAP.
 
 Ask the user to confirm. Do not proceed until they explicitly confirm.
 

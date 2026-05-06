@@ -616,7 +616,9 @@ export function createToolsContext(api: any) {
           wallet: {
             address: billingWallet.address,
             networkLabel: billingEvmConfig.networkLabel,
+            tokenSymbol: billingEvmConfig.tokenSymbol,
             tokenAddress: billingEvmConfig.tokenAddress,
+            vaultAddress: billingEvmConfig.vaultAddress,
             usesNostrPrivateKey: true,
           },
           nft: {
@@ -835,7 +837,9 @@ export function createToolsContext(api: any) {
         oswapBalance: formatAmount(walletOswapBalanceRaw, billingEvmConfig.tokenDecimals),
         bnbBalance: formatAmount(walletBnbBalanceRaw, 18, 8),
         networkLabel: billingEvmConfig.networkLabel,
+        tokenSymbol: billingEvmConfig.tokenSymbol,
         tokenAddress: billingEvmConfig.tokenAddress,
+        vaultAddress: billingEvmConfig.vaultAddress,
         usesNostrPrivateKey: true,
       },
       nft: {

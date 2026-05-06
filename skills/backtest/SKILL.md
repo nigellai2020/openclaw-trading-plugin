@@ -134,7 +134,8 @@ Call `get_backtests` with no parameters to list the user's past manual backtests
 
 If the user asks for the backtest result of a top/leaderboard agent (e.g. "show the 1m backtest result of the top agent"), do **not** start a new manual backtest. The auto runs are already accessible:
 
-1. Call `backtest_leader_board` with the requested `period` (and `limit: 1` if they only want the top agent). Each entry includes a `job_id` — that is the agent's auto backtest jobId for that period.
-2. Pass that `job_id` and the entry's `agent_id` to `get_backtest_result`. Use the same Step-7 `mode` flow: ask "detail or link?" if the user did not specify.
+1. Call `backtest_leader_board` with the requested `period` (and `limit: 1` if they only want the top agent). Each entry includes an agent ID (`agent_id` / `agentId`) and a `job_id` / `jobId` for that period's auto backtest.
+2. When you summarize leaderboard results, always surface the agent ID to the user so they can refer to a specific leaderboard entry later.
+3. Pass that `job_id` and the entry's `agent_id` to `get_backtest_result`. Use the same Step-7 `mode` flow: ask "detail or link?" if the user did not specify.
 
 The same applies when the user names an agent and you can resolve its leaderboard entry for the period — pull the `job_id` from there rather than asking the user for one.
