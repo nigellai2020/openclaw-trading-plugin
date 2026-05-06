@@ -2843,7 +2843,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     description:
       "Get the backtest leaderboard showing top-performing agents ranked by return percentage. " +
       "Specify a period (1d, 1w, 1m) and optional limit. " +
-      "Each entry includes the agent's `job_id` for that period's auto backtest — pass it to `get_backtest_result` to fetch the full run detail.",
+      "Each entry includes the leaderboard agent ID as `agent_id` (also mirrored as `agentId`) and the auto-backtest job ID as `job_id` (also mirrored as `jobId`). " +
+      "When presenting leaderboard results, always include the agent ID next to the agent name so the user can refer to a specific agent in follow-up requests. " +
+      "Pass the job ID to `get_backtest_result` to fetch the full run detail.",
     parameters: Type.Object({
       period: Type.Union([
         Type.Literal("1d"),
@@ -2857,7 +2859,34 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const res = await fetch(`${baseUrl}/api/backtest-leaderboard?period=${params.period}&limit=${limit}`);
       const body = await res.json();
       if (!res.ok) throw new Error(`backtest_leader_board failed: ${res.status} ${responseErrorMessage(body)}`);
-      return textResult(body);
+
+      const rows = Array.isArray(body?.data) ? body.data : [];
+      const data = rows.map((row: any) => {
+        if (typeof row !== "object" || row === null) return row;
+
+        return {
+          ...row,
+          agentId:
+            typeof row.agentId === "number"
+              ? row.agentId
+              : typeof row.agent_id === "number"
+                ? row.agent_id
+                : undefined,
+          jobId:
+            typeof row.jobId === "string"
+              ? row.jobId
+              : typeof row.job_id === "string"
+                ? row.job_id
+                : undefined,
+        };
+      });
+
+      return textResult({
+        ...body,
+        data,
+        presentationHint:
+          "When listing leaderboard results, include each agent's ID together with the name, for example: Agent 3027 - Trend Follower.",
+      });
     },
   });
 
