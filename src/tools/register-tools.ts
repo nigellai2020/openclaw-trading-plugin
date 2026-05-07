@@ -161,6 +161,15 @@ function buildBillingBreakdown(
   };
 }
 
+function resolveChainLabel(chainId: number | null | undefined): string | null {
+  if (chainId == null) return null;
+  if (chainId === 998) return "Hyperliquid Testnet";
+  if (chainId === 999) return "Hyperliquid Mainnet";
+  const evmConfig = getEvmChainConfig(chainId);
+  if (evmConfig?.networkLabel) return evmConfig.networkLabel;
+  return `Chain ${chainId}`;
+}
+
 export default function registerTools(api: any, ctx: ToolsContext = createToolsContext(api)) {
   const {
     pluginConfig,
@@ -1354,6 +1363,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         pair: sourceSymbol ?? null,
         marketType: sourceMarketType,
         chainId: sourceChainId,
+        chainLabel: resolveChainLabel(sourceChainId),
         currentValueUsd: sourceAgent?.current_value_usd ?? null,
         initialCapital: sourceAgent?.initialCapital ?? sourceAgent?.initial_capital ?? null,
         copiedFrom: sourceAgent?.copied_from ?? null,
@@ -1540,6 +1550,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         symbol: sourceSymbol,
         marketType: sourceMarketType,
         chainId: resolvedPreviewChainId,
+        chainLabel: resolveChainLabel(resolvedPreviewChainId),
         leverage: walletDerivedBuyLimit?.leverage ?? DEFAULT_LIVE_LEVERAGE,
         initialCapital: walletDerivedBuyLimit?.initialCapital ?? sourceAgent?.initialCapital ?? sourceAgent?.initial_capital ?? null,
         buyLimit: walletDerivedBuyLimit?.buyLimit ?? (walletPreview ? sourceBuyLimit : null),
@@ -2084,6 +2095,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         pair: sourceSymbol,
         marketType: sourceMarketType,
         chainId: sourceChainId,
+        chainLabel: resolveChainLabel(sourceChainId),
         buyLimit: sourceAgent?.buy_limit ?? sourceAgent?.buyLimit ?? null,
         currentValueUsd: sourceAgent?.current_value_usd ?? null,
         copiedFrom: sourceAgent?.copied_from ?? null,
@@ -2256,6 +2268,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           symbol: sourceSymbol,
           marketType: sourceMarketType,
           chainId: resolvedChainId,
+          chainLabel: resolveChainLabel(resolvedChainId),
           leverage: derivedDefaultBuyLimit?.leverage ?? DEFAULT_LIVE_LEVERAGE,
           initialCapital: derivedDefaultBuyLimit?.initialCapital ?? null,
           buyLimit: resolvedBuyLimit,
@@ -2270,6 +2283,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           symbol: sourceSymbol,
           marketType: sourceMarketType,
           chainId: resolvedChainId,
+          chainLabel: resolveChainLabel(resolvedChainId),
           initialCapital: params.initialCapital ?? (sourceAgent?.initialCapital ?? sourceAgent?.initial_capital ?? null),
         };
       }

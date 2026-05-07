@@ -52,7 +52,9 @@ Handle the response:
     - BNB reserved for swap
     - BNB reserved for gas
     - total BNB needed and current BNB shortfall
+    - renewal amount and renewal timing from `subscription.renewalAmount`, `subscription.renewalPeriodDays`, and `subscription.estimatedEndTime`
   - If the total shortfall is something like `0.018 BNB`, explain what makes it up. Example: "~0.018 BNB total = ~0.015 BNB max for the OSWAP swap + ~0.003 BNB for gas."
+  - Never describe `fees.oswapForInitialVaultCredit` as just "8 OSWAP" without fee type context. Explicitly say this vault top-up is the first billing period credit and that `fees.firstBillingAmount` equals operating + protocol + strategy fees.
 - Do **not** ask the user for market type or strategy.
 
 ## Step 3 — Wallet selection (live mode only)
@@ -111,12 +113,14 @@ Present a summary:
 - **effective mode** for the new copy (highlight if different from source)
 - pair / symbol
 - market type
+- network label and chain: always render as `<human network name> (chainId <id>)`, for example `Hyperliquid Mainnet (chainId 999)` or `Hyperliquid Testnet (chainId 998)`
 - **Live only**: derived network and `chainId`, selected wallet and master wallet, default live capital from wallet, default leverage, buy limit
 - **Paper only**: initial capital (if overridden)
 - optional alias
 - optional chainId override
 - optional order override
 - whether upfront billing setup is required
+- renewal reminder: `subscription.renewalAmount` OSWAP every `subscription.renewalPeriodDays` days, next renewal around `subscription.estimatedEndTime`
 
 When showing the selected wallet or master wallet, never use a table or ellipsis. Show full monospace addresses on their own lines.
 When showing the billing wallet, never use a table or ellipsis. Show the full address on its own line.
@@ -132,12 +136,14 @@ If billing is required and funding is still needed, follow this format instead o
   - `NFT: <fees.oswapForNft> OSWAP`
   - `Need now: <fees.requiredOswap> OSWAP total, shortfall <fees.oswapShortfall> OSWAP`
   - `BNB: <funding.bnbForSwapMax> for swap + <funding.bnbForGas> for gas = <funding.totalBnbNeeded> total; shortfall <funding.bnbShortfall>`
+  - `Renewal: keep <subscription.renewalAmount> OSWAP available every <subscription.renewalPeriodDays> days (next around <subscription.estimatedEndTime>)`
 - Show these full copyable lines:
   - `Billing wallet: <full billingWallet.address>`
   - `Network: <billingWallet.networkLabel>`
   - `OSWAP token: <full billingWallet.tokenAddress>`
   - `Billing vault: <full billingWallet.vaultAddress>`
 - Avoid phrasing like `8 OSWAP deposit into billing vault` without first saying whether the user needs to deposit BNB or already has enough OSWAP.
+- Avoid phrasing like `Pair: ETH/USDC · Perps · Chain 999`; use a human label plus ID, e.g. `Pair: ETH/USDC · Perps · Hyperliquid Mainnet (chainId 999)`.
 
 Ask the user to confirm. Do not proceed until they explicitly confirm.
 Confirmation rules:
