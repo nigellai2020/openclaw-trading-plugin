@@ -2635,6 +2635,37 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
+  api.registerTool({
+    name: "search_public_agents",
+    description: "Search public trading agents by name using /api/agents/search. Use this when a user references an agent by name but the source agent ID is unknown.",
+    parameters: Type.Object({
+      query: Type.String({ description: "Agent name or partial name to search" }),
+      limit: Type.Optional(Type.Number({ description: "Maximum number of matches to return (default 10)", default: 10 })),
+    }),
+    async execute(_id: string, params: { query: string; limit?: number }) {
+      const q = params.query?.trim();
+      if (!q) {
+        return textResult({ error: "query is required" });
+      }
+      const limit = params.limit != null ? Math.max(1, Math.floor(params.limit)) : 10;
+      const qs = new URLSearchParams({ q, limit: String(limit) });
+      const res = await fetch(`${baseUrl}/api/agents/search?${qs.toString()}`);
+      const body = await parseResponseBody(res);
+      if (!res.ok) {
+        return textResult({
+          error: `search_public_agents failed: ${res.status} ${responseErrorMessage(body)}`,
+          query: q,
+        });
+      }
+      const rows = Array.isArray(body?.data) ? body.data : [];
+      return textResult({
+        query: q,
+        count: rows.length,
+        data: rows,
+      });
+    },
+  });
+
 
   // ── List & delete tools ────────────────────────────────────────────
 

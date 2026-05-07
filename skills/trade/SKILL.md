@@ -146,7 +146,8 @@ Please review your agent before funding your wallet.
 
 ## Billing breakdown
 
-- First billing amount: *{fees.firstBillingAmount} OSWAP* = operating fee *{fees.operatingFee}* + protocol fee *{fees.protocolFee}* + strategy fee *{fees.strategyFee}*
+- First billing amount: *{fees.firstBillingAmount} OSWAP* = {sum of non-zero fee components only}
+- If strategy fee is zero, do not show it. Example: `operating fee *{fees.operatingFee}* + protocol fee *{fees.protocolFee}*`
 - Existing billing credit: *{fees.existingVaultCredit} OSWAP*
 - Billing credit added for this setup: *{fees.oswapForInitialVaultCredit} OSWAP*
 - NFT requirement: *{fees.oswapForNft} OSWAP* {say "(not needed; eligible NFT already found)" when zero}
@@ -163,6 +164,7 @@ Please review your agent before funding your wallet.
 - *Deposit network:* {wallet.networkLabel}
 - *Deposit BNB to:* `{wallet.address}`
 - This deposit network is for billing setup and can differ from the trading market network
+- If deposit network is *BNB Chain Testnet*, add: `Need testnet BNB? Use the faucet: https://www.bnbchain.org/en/testnet-faucet`
 
 ## Fund your wallet
 
@@ -199,9 +201,10 @@ Render rules:
   - Always show the Billing breakdown section whenever `billing.required = true`, even when some amounts are zero.
   - Use non-technical, retail-style wording in the default summary. Avoid internal terms like `billing vault`, `token address`, `chainId`, `settlement config`, and backend API names unless the user asks.
   - Explicitly state the BNB deposit network and that it may differ from the trading market network.
+  - If the deposit network is BNB Chain Testnet, include testnet faucet guidance: https://www.bnbchain.org/en/testnet-faucet
   - If `fees.oswapShortfall = 0`, the user already has enough OSWAP — hide Option 1 (swap) and adjust the "You need" section to only show gas fees. Say existing OSWAP covers the requirement.
   - If `funding.bnbShortfall = 0`, say wallet is already funded and skip the "Fund your wallet" and "Funding details" sections. Go straight to asking for confirmation.
-  - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, skip the funding sections entirely. Show a concise summary instead: existing eligible NFT, existing vault credit covers the first period, no upfront payment needed, remind about `subscription.renewalAmount` OSWAP by `subscription.estimatedEndTime` for auto renewal. Ask the user to confirm.
+  - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, skip the funding sections entirely. Show a concise summary instead: existing eligible NFT, existing billing credit covers the first period, no upfront payment needed, remind about `subscription.renewalAmount` OSWAP by `subscription.estimatedEndTime` for auto renewal. Ask the user to confirm.
   - For live mode, omit "Initial Capital" from the Agent section (it is auto-fetched from wallet balance).
   - Do not show raw chain IDs in user-facing summaries unless the user explicitly requests technical details.
 
