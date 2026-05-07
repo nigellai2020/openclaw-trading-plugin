@@ -94,6 +94,7 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 - Explain that OpenClaw uses the configured `nostrPrivateKey` as the BSC/Ethereum signing key for any required NFT checks, OSWAP funding, vault credit deposit, and billing auth.
 - Explain that `prepare_agent_creation` automatically registers the derived billing wallet through `POST /api/auth/login` before billing checks.
 - Explain that the plugin loads all active NFT configs from `/api/nft-config` and only uses the cheapest eligible NFT when a new mint is required.
+- `prepare_agent_creation` is a **read-only preflight**. It does **not** authorize deployment. After calling it, your next message must present the summary and ask for confirmation. Do **not** call `deploy_agent` in the same turn as the preflight.
 - Call `prepare_agent_creation` with:
   - Paper: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
   - Live: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
@@ -141,6 +142,20 @@ Please review your agent before funding your wallet.
 - To keep this agent running, please make sure *{subscription.renewalAmount} OSWAP is available again by that time*
 - Billing is based on *{subscription.renewalPeriodDays}-day periods*, not calendar months
 
+## Billing breakdown
+
+- First billing amount: *{fees.firstBillingAmount} OSWAP* = operating fee *{fees.operatingFee}* + protocol fee *{fees.protocolFee}* + strategy fee *{fees.strategyFee}*
+- Existing vault credit: *{fees.existingVaultCredit} OSWAP*
+- Vault top-up for this setup: *{fees.oswapForInitialVaultCredit} OSWAP*
+- NFT requirement: *{fees.oswapForNft} OSWAP* {say "(not needed; eligible NFT already found)" when zero}
+- Total OSWAP required now: *{fees.requiredOswap} OSWAP*
+- Current billing-wallet OSWAP shortfall: *{fees.oswapShortfall} OSWAP*
+- BNB reserved for swap: *~{funding.bnbForSwapMax} BNB* {or say zero when no swap is needed}
+- BNB reserved for gas: *~{funding.bnbForGas} BNB*
+- Total BNB needed: *~{funding.totalBnbNeeded} BNB*
+- Current BNB shortfall: *~{funding.bnbShortfall} BNB*
+- Explain the shortfall in plain language. Example: "The ~0.018 BNB shortfall is made up of ~0.015 BNB to swap into OSWAP plus ~0.003 BNB for gas."
+
 ## Fund your wallet on *{wallet.networkLabel}*
 
 You need:
@@ -173,12 +188,19 @@ After funding your wallet, reply:
 
 Render rules:
   - If `nft.hasEligibleNft = true`, do not show an NFT charge in the billing section.
+  - Always show the Billing breakdown section whenever `billing.required = true`, even when some amounts are zero.
   - If `fees.oswapShortfall = 0`, the user already has enough OSWAP — hide Option 1 (swap) and adjust the "You need" section to only show gas fees. Say existing OSWAP covers the requirement.
   - If `funding.bnbShortfall = 0`, say wallet is already funded and skip the "Fund your wallet" and "Funding details" sections. Go straight to asking for confirmation.
   - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, skip the funding sections entirely. Show a concise summary instead: existing eligible NFT, existing vault credit covers the first period, no upfront payment needed, remind about `subscription.renewalAmount` OSWAP by `subscription.estimatedEndTime` for auto renewal. Ask the user to confirm.
   - For live mode, omit "Initial Capital" from the Agent section (it is auto-fetched from wallet balance).
 
 Ask the user to confirm or say "Done" after funding. Do NOT proceed until they explicitly confirm.
+Confirmation rules:
+  - The user's original request to "create" the agent does **not** count as post-checkout confirmation.
+  - You must ask a direct confirmation question after the checkout is shown.
+  - Only proceed on an explicit reply such as `confirm`, `yes, create it`, `proceed`, or `done` after funding.
+  - If the user asks a question about the billing amounts, answer it first and ask for confirmation again.
+  - If `deploy_agent` was called too early and returns a funding shortfall, explain the breakdown, acknowledge that deployment should have waited for confirmation, and return to the confirmation step instead of behaving as if the user had already approved.
 
 ## Step 9 — Deploy agent
 Call `deploy_agent` with:

@@ -93,6 +93,74 @@ function validateRequestedTokenSymbols(symbols?: string[]): TokenPriceValidation
   });
 }
 
+function buildBillingBreakdown(
+  preparedContext: PreparedAgentCreationContext,
+  billingEvmConfig: { networkLabel: string; tokenSymbol: string },
+) {
+  const wallet = preparedContext.prepared.wallet;
+  const fees = preparedContext.prepared.fees;
+  const funding = preparedContext.prepared.funding;
+  const gas = preparedContext.prepared.gas;
+  const tokenSymbol = wallet.tokenSymbol ?? billingEvmConfig.tokenSymbol;
+  const bnbForSwapMax = funding?.bnbForSwapMax ?? "0";
+  const bnbForGas = funding?.bnbForGas ?? "0";
+  const totalBnbNeeded = funding?.totalBnbNeeded ?? "0";
+  const bnbShortfall = funding?.bnbShortfall ?? "0";
+  const oswapShortfall = fees.oswapShortfall ?? "0";
+
+  let summary = `Need up to ${totalBnbNeeded} BNB total on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}.`;
+  if (Number(oswapShortfall) > 0) {
+    summary =
+      `Need up to ${totalBnbNeeded} BNB total on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}: ` +
+      `${bnbForSwapMax} BNB max to swap into ${oswapShortfall} ${tokenSymbol} plus ${bnbForGas} BNB for gas.`;
+  } else if (Number(bnbShortfall) > 0) {
+    summary =
+      `Existing ${tokenSymbol} covers billing. Need ${bnbForGas} BNB for gas on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}.`;
+  } else {
+    summary = `Existing ${tokenSymbol} and BNB balances already cover the setup on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}.`;
+  }
+
+  return {
+    summary,
+    network: wallet.networkLabel ?? billingEvmConfig.networkLabel,
+    tokenSymbol,
+    billingWalletAddress: wallet.address ?? null,
+    billingVaultAddress: wallet.vaultAddress ?? null,
+    billingTokenAddress: wallet.tokenAddress ?? null,
+    walletBalances: {
+      oswap: wallet.oswapBalance ?? null,
+      bnb: wallet.bnbBalance ?? null,
+    },
+    fees: {
+      operatingFee: fees.operatingFee,
+      protocolFee: fees.protocolFee,
+      strategyFee: fees.strategyFee,
+      firstBillingAmount: fees.firstBillingAmount,
+      existingVaultCredit: fees.existingVaultCredit,
+      targetVaultCredit: fees.targetVaultCredit,
+      oswapForNft: fees.oswapForNft,
+      oswapForInitialVaultCredit: fees.oswapForInitialVaultCredit,
+      requiredOswap: fees.requiredOswap,
+      oswapShortfall,
+    },
+    funding: funding
+      ? {
+          bnbForSwapQuoted: funding.bnbForSwapQuoted,
+          bnbForSwapMax,
+          bnbForGas,
+          totalBnbNeeded,
+          bnbShortfall,
+        }
+      : null,
+    gas: gas
+      ? {
+          gasPriceGwei: gas.gasPriceGwei,
+          steps: gas.steps,
+        }
+      : null,
+  };
+}
+
 export default function registerTools(api: any, ctx: ToolsContext = createToolsContext(api)) {
   const {
     pluginConfig,
@@ -1171,7 +1239,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "prepare_agent_creation",
-    description: "Preflight for direct agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction.",
+    description: "Read-only preflight for direct agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction. OpenClaw must present this result to the user and get explicit confirmation before calling deploy_agent.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
@@ -1205,7 +1273,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           publicKey,
           privateKey,
         });
-        return textResult(prepared.prepared);
+        return textResult({
+          ...prepared.prepared,
+          confirmationRequired: true,
+          nextStep: "present_checkout_and_wait_for_explicit_confirmation",
+        });
       } catch (e: any) {
         return textResult({ error: e.message });
       }
@@ -1214,7 +1286,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "prepare_copy_agent",
-    description: "Validate prerequisites and infer defaults for creating a copy-trading agent (live or paper) from an existing public source agent. Mirrors the normal agent creation preflight, including any required billing setup before calling /api/copy-agent. For paper mode, wallet preview steps are optional.",
+    description: "Read-only preflight for creating a copy-trading agent (live or paper) from an existing public source agent. Mirrors the normal agent creation preflight, including any required billing setup before calling /api/copy-agent. For paper mode, wallet preview steps are optional. OpenClaw must present the returned summary and get explicit confirmation before calling deploy_copy_agent.",
     parameters: Type.Object({
       sourceAgentId: Type.Number({ description: "Existing public source agent ID to copy" }),
       mode: Type.Optional(Type.Union([Type.Literal("live"), Type.Literal("paper")], { description: "Mode for the copying agent: 'live' or 'paper'. Defaults to the source agent's mode." })),
@@ -1422,6 +1494,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       if (preparedContext.prepared.gas) {
         result.gas = preparedContext.prepared.gas;
       }
+      result.billingBreakdown = buildBillingBreakdown(preparedContext, billingEvmConfig);
 
       const walletAddress = preparedContext.prepared.wallet.address;
       const tokenSymbol = preparedContext.prepared.wallet.tokenSymbol ?? "OSWAP";
@@ -1502,6 +1575,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
               "Create the copied paper agent via POST /api/copy-agent (with delegateToTradingBot; no settlement step needed).",
             ],
       };
+      result.confirmationRequired = true;
+      result.nextStep = "present_copy_agent_summary_and_wait_for_explicit_confirmation";
 
       return textResult(result);
     },
@@ -1509,7 +1584,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Uses delegateToTradingBot and delegateToSettlement flags on POST /api/agent so the server handles all downstream syncing internally.",
+    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Uses delegateToTradingBot and delegateToSettlement flags on POST /api/agent so the server handles all downstream syncing internally. Call this only after a separate preflight has been shown to the user and the user has explicitly confirmed creation.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount (auto-fetched for live mode)" })),
@@ -1636,12 +1711,14 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           required: true,
           walletAddress: activeBillingWallet.address,
           preflight: preparedContext.prepared,
+          confirmationRequired: true,
           transactions: billingTransactions,
         };
 
         if (preparedContext.bnbShortfallRaw > 0n) {
           return textResult({
             error: `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`,
+            billingShortfall: buildBillingBreakdown(preparedContext, billingEvmConfig),
             ...result,
           });
         }
@@ -1905,7 +1982,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "deploy_copy_agent",
-    description: "Create a copy-trading agent from an existing public source agent. Supports all four scenarios: paper→live, live→live, paper→paper, live→paper. For live mode, executes: billing preflight, POST /api/copy-agent (with delegateToTradingBot + delegateToSettlement), wallet authorization, and verification. For paper mode, executes: billing preflight, POST /api/copy-agent (with delegateToTradingBot), and verification.",
+    description: "Create a copy-trading agent from an existing public source agent. Supports all four scenarios: paper→live, live→live, paper→paper, live→paper. For live mode, executes: billing preflight, POST /api/copy-agent (with delegateToTradingBot + delegateToSettlement), wallet authorization, and verification. For paper mode, executes: billing preflight, POST /api/copy-agent (with delegateToTradingBot), and verification. Call this only after a separate preflight has been shown to the user and the user has explicitly confirmed creation.",
     parameters: Type.Object({
       sourceAgentId: Type.Number({ description: "Existing public source agent ID to copy" }),
       mode: Type.Optional(Type.Union([Type.Literal("live"), Type.Literal("paper")], { description: "Mode for the copying agent: 'live' or 'paper'. Defaults to the source agent's mode." })),
@@ -2224,11 +2301,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           required: true,
           walletAddress: activeBillingWallet.address,
           preflight: preparedContext.prepared,
+          confirmationRequired: true,
           transactions: billingTransactions,
         };
 
         if (preparedContext.bnbShortfallRaw > 0n) {
           result.error = `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`;
+          result.billingShortfall = buildBillingBreakdown(preparedContext, billingEvmConfig);
           debugLog("deploy_copy_agent", "result", result);
           return textResult(result);
         }
