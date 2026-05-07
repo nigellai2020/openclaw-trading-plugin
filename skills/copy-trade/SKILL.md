@@ -24,7 +24,14 @@ Handle the response:
 
 ## Step 2 — Identify the source agent and determine effective mode
 
-If the user already provided a source agent ID, use it. Otherwise ask for it.
+If the user already provided a source agent ID, use it.
+
+If the user gives an agent **name** (or partial name) but not an ID:
+- Call `search_public_agents` with that name.
+- Show the top matches (ID + name + pair/mode) and ask the user which ID they want.
+- Use this tool only when you do not already know the intended source agent ID.
+
+If neither ID nor clear name is provided, ask for the source agent ID.
 
 Call `prepare_copy_agent` with `sourceAgentId` (and `mode` if the user already stated a preference).
 
@@ -35,13 +42,25 @@ Handle the response:
   - Otherwise → use `sourceAgent.mode`.
 - Use `sourceAgent.name`, `sourceAgent.marketType`, `defaults.symbol`, `defaults.chainId` as the copy defaults.
 - Use the billing preflight returned by `prepare_copy_agent`:
+  - `prepare_copy_agent` is a **read-only preflight**. It does **not** authorize deployment. After calling it, your next message must present the summary and ask for confirmation. Do **not** call `deploy_copy_agent` in the same turn as the preflight.
   - If `billing.required = false`, say no upfront billing setup is required.
   - If `billing.required = true`, present the returned billing, NFT, fee, gas, subscription, and funding details before deployment, following the same style used in the normal `trade` flow.
   - Always show the full billing wallet address from `billingWallet.address` on its own line. Never truncate or abbreviate it.
-  - Always show the full vault address from `billingWallet.vaultAddress` when mentioning vault approval or deposit.
   - If `fees.oswapShortfall > 0`, tell the user to deposit BNB into the billing wallet, not OSWAP by default. State the amount to top up as `billingFundingHint.amountToDeposit` BNB, and explain that OpenClaw will swap part of that BNB into OSWAP and use the rest for gas.
   - If `fees.oswapShortfall = 0` and `funding.bnbShortfall > 0`, tell the user they already have enough OSWAP and only need to top up BNB for gas.
   - If both shortfalls are zero, say the billing wallet is already funded and ask for confirmation directly.
+  - Always include a plain-language billing breakdown. At minimum, state:
+    - first billing amount = operating fee + protocol fee + strategy fee
+    - existing billing credit
+    - billing credit top-up amount
+    - NFT amount if any
+    - total OSWAP required and current OSWAP shortfall
+    - BNB reserved for swap
+    - BNB reserved for gas
+    - total BNB needed and current BNB shortfall
+    - renewal amount and renewal timing from `subscription.renewalAmount`, `subscription.renewalPeriodDays`, and `subscription.estimatedEndTime`
+  - If the total shortfall is something like `0.018 BNB`, explain what makes it up. Example: "~0.018 BNB total = ~0.015 BNB max for the OSWAP swap + ~0.003 BNB for gas."
+  - Never describe `fees.oswapForInitialVaultCredit` as just "8 OSWAP" without fee type context. Explicitly say this billing-credit top-up funds the first billing period and that `fees.firstBillingAmount` equals operating + protocol + strategy fees.
 - Do **not** ask the user for market type or strategy.
 
 ## Step 3 — Wallet selection (live mode only)
@@ -100,29 +119,57 @@ Present a summary:
 - **effective mode** for the new copy (highlight if different from source)
 - pair / symbol
 - market type
-- **Live only**: derived network and `chainId`, selected wallet and master wallet, default live capital from wallet, default leverage, buy limit
+- trading market/network in plain language only (example: `Hyperliquid Mainnet`). Do **not** show raw chain IDs unless the user explicitly asks.
+- **Live only**: selected wallet and master wallet, default live capital from wallet, default leverage, buy limit
 - **Paper only**: initial capital (if overridden)
 - optional alias
-- optional chainId override
+- optional network override (plain network name; do not surface chain IDs by default)
 - optional order override
 - whether upfront billing setup is required
+- renewal reminder: `subscription.renewalAmount` OSWAP every `subscription.renewalPeriodDays` days, next renewal around `subscription.estimatedEndTime`
 
 When showing the selected wallet or master wallet, never use a table or ellipsis. Show full monospace addresses on their own lines.
 When showing the billing wallet, never use a table or ellipsis. Show the full address on its own line.
 
+Style rules for end users (retail UX):
+- Keep wording non-technical and action-oriented.
+- Explain that billing and trading networks can be different whenever applicable.
+- If the copied strategy trades on one network (for example Hyperliquid) but billing happens on another (for example BNB Chain Testnet), call this out clearly.
+- Avoid internal implementation terms unless the user explicitly asks. Do not mention contract-level terms like `billing vault`, `token address`, `chainId`, `settlement config`, or backend API names in the default summary.
+
 If billing is required and funding is still needed, follow this format instead of an ambiguous checklist:
 
 - State clearly whether the user must top up **BNB** or can proceed with existing balances.
+- Explicitly state the deposit network for BNB (for example: `Deposit BNB on BNB Chain Testnet to your billing wallet`).
+- Explicitly state that this funding network is for billing setup and may differ from the trading market network.
 - If `fees.oswapShortfall > 0`, say: the billing wallet currently has insufficient OSWAP, so the user should deposit approximately `billingFundingHint.amountToDeposit` BNB to the billing wallet. Mention that OpenClaw will convert part of it into OSWAP automatically.
 - If `fees.oswapShortfall = 0`, say existing OSWAP covers the billing amount and mention only the required BNB gas top-up if any.
-- Show these full copyable lines:
-  - `Billing wallet: <full billingWallet.address>`
-  - `Network: <billingWallet.networkLabel>`
-  - `OSWAP token: <full billingWallet.tokenAddress>`
-  - `Billing vault: <full billingWallet.vaultAddress>`
-- Avoid phrasing like `8 OSWAP deposit into billing vault` without first saying whether the user needs to deposit BNB or already has enough OSWAP.
+- If `billingWallet.networkLabel` is `BNB Chain Testnet`, tell the user they can get testnet BNB from: https://www.bnbchain.org/en/testnet-faucet
+- Always add the numeric breakdown that leads to the BNB total. Example wording:
+  - `First billing amount: <fees.firstBillingAmount> OSWAP = <non-zero components only>`
+  - Example when strategy fee is zero: `operating <fees.operatingFee> + protocol <fees.protocolFee>`
+  - Do **not** append literal notes like `(strategy fee is 0, not shown)`.
+  - Keep the fee line clean and retail-friendly: include only the non-zero components and stop there.
+  - `This first billing amount is your first billing period charge (not a trading fee).`
+  - `You already have <fees.existingVaultCredit> OSWAP billing credit; this setup adds <fees.oswapForInitialVaultCredit> OSWAP credit for the first period.`
+  - `NFT: <fees.oswapForNft> OSWAP`
+  - `Need now: <fees.requiredOswap> OSWAP total, shortfall <fees.oswapShortfall> OSWAP`
+  - `BNB: <funding.bnbForSwapMax> for swap + <funding.bnbForGas> for gas = <funding.totalBnbNeeded> total; shortfall <funding.bnbShortfall>`
+  - `Renewal: keep <subscription.renewalAmount> OSWAP available every <subscription.renewalPeriodDays> days (next around <subscription.estimatedEndTime>)`
+- Show these full copyable lines by default:
+  - `Deposit network: <billingWallet.networkLabel>`
+  - `Deposit BNB to: <full billingWallet.address>`
+- Only show `OSWAP token` or other contract addresses if the user explicitly asks for technical details.
+- Avoid phrasing like `8 OSWAP deposit` without first saying what the 8 OSWAP is for.
+- Avoid phrasing like `Pair: ETH/USDC · Perps · Hyperliquid Mainnet (chainId 999)`; use plain network names only.
 
 Ask the user to confirm. Do not proceed until they explicitly confirm.
+Confirmation rules:
+  - The user's original request to copy or create the agent does **not** count as confirmation after the checkout is shown.
+  - You must ask a direct confirmation question after presenting the summary.
+  - Only proceed on an explicit reply such as `confirm`, `yes, create it`, `proceed`, or `done` after funding.
+  - If the user asks why a funding number is needed, answer with the billing breakdown and then ask for confirmation again.
+  - If `deploy_copy_agent` was called too early and returns a funding shortfall, explain the breakdown, acknowledge that deployment should have waited for confirmation, and return to the confirmation step.
 
 ## Step 6 — Deploy copied agent
 
