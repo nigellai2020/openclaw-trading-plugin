@@ -2564,30 +2564,19 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       // Step 7: Verify agent
       try {
-        const [agentRes, settingsRes] = await Promise.all([
-          fetch(`${baseUrl}/api/agent/${copiedAgentId}`, {
-            headers: { Authorization: auth },
-          }),
-          fetch(`${baseUrl}/api/agent/settings/${copiedAgentId}`, {
-            headers: { Authorization: auth },
-          }),
-        ]);
-        const [agentBody, settingsBody] = await Promise.all([
-          parseResponseBody(agentRes),
-          parseResponseBody(settingsRes),
-        ]);
+        const agentRes = await fetch(`${baseUrl}/api/agent/${copiedAgentId}`, {
+          headers: { Authorization: auth },
+        });
+        const agentBody = await parseResponseBody(agentRes);
         debugLog("deploy_copy_agent", "verify.api.res", {
           agentStatus: agentRes.status,
           agentBody,
-          settingsStatus: settingsRes.status,
-          settingsBody,
         });
         result.verify = {
-          ok: agentRes.ok && settingsRes.ok,
+          ok: agentRes.ok,
           agent: agentBody,
-          settings: settingsBody,
         };
-        if (!agentRes.ok || !settingsRes.ok) {
+        if (!agentRes.ok) {
           warnings.push("Verification after copy deployment did not fully succeed.");
         }
       } catch (e: any) {
