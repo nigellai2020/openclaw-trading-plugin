@@ -113,11 +113,11 @@ Present a summary:
 - **effective mode** for the new copy (highlight if different from source)
 - pair / symbol
 - market type
-- network label and chain: always render as `<human network name> (chainId <id>)`, for example `Hyperliquid Mainnet (chainId 999)` or `Hyperliquid Testnet (chainId 998)`
-- **Live only**: derived network and `chainId`, selected wallet and master wallet, default live capital from wallet, default leverage, buy limit
+- trading market/network in plain language only (example: `Hyperliquid Mainnet`). Do **not** show raw chain IDs unless the user explicitly asks.
+- **Live only**: selected wallet and master wallet, default live capital from wallet, default leverage, buy limit
 - **Paper only**: initial capital (if overridden)
 - optional alias
-- optional chainId override
+- optional network override (plain network name; do not surface chain IDs by default)
 - optional order override
 - whether upfront billing setup is required
 - renewal reminder: `subscription.renewalAmount` OSWAP every `subscription.renewalPeriodDays` days, next renewal around `subscription.estimatedEndTime`
@@ -125,25 +125,33 @@ Present a summary:
 When showing the selected wallet or master wallet, never use a table or ellipsis. Show full monospace addresses on their own lines.
 When showing the billing wallet, never use a table or ellipsis. Show the full address on its own line.
 
+Style rules for end users (retail UX):
+- Keep wording non-technical and action-oriented.
+- Explain that billing and trading networks can be different whenever applicable.
+- If the copied strategy trades on one network (for example Hyperliquid) but billing happens on another (for example BNB Chain Testnet), call this out clearly.
+- Avoid internal implementation terms unless the user explicitly asks. Do not mention contract-level terms like `billing vault`, `token address`, `chainId`, `settlement config`, or backend API names in the default summary.
+
 If billing is required and funding is still needed, follow this format instead of an ambiguous checklist:
 
 - State clearly whether the user must top up **BNB** or can proceed with existing balances.
+- Explicitly state the deposit network for BNB (for example: `Deposit BNB on BNB Chain Testnet to your billing wallet`).
+- Explicitly state that this funding network is for billing setup and may differ from the trading market network.
 - If `fees.oswapShortfall > 0`, say: the billing wallet currently has insufficient OSWAP, so the user should deposit approximately `billingFundingHint.amountToDeposit` BNB to the billing wallet. Mention that OpenClaw will convert part of it into OSWAP automatically.
 - If `fees.oswapShortfall = 0`, say existing OSWAP covers the billing amount and mention only the required BNB gas top-up if any.
 - Always add the numeric breakdown that leads to the BNB total. Example wording:
   - `First billing amount: <fees.firstBillingAmount> OSWAP = operating <fees.operatingFee> + protocol <fees.protocolFee> + strategy <fees.strategyFee>`
-  - `Vault credit: existing <fees.existingVaultCredit> OSWAP, top-up <fees.oswapForInitialVaultCredit> OSWAP`
+  - `This first billing amount is your first billing period charge (not a trading fee).`
+  - `You already have <fees.existingVaultCredit> OSWAP billing credit; this setup adds <fees.oswapForInitialVaultCredit> OSWAP credit for the first period.`
   - `NFT: <fees.oswapForNft> OSWAP`
   - `Need now: <fees.requiredOswap> OSWAP total, shortfall <fees.oswapShortfall> OSWAP`
   - `BNB: <funding.bnbForSwapMax> for swap + <funding.bnbForGas> for gas = <funding.totalBnbNeeded> total; shortfall <funding.bnbShortfall>`
   - `Renewal: keep <subscription.renewalAmount> OSWAP available every <subscription.renewalPeriodDays> days (next around <subscription.estimatedEndTime>)`
-- Show these full copyable lines:
-  - `Billing wallet: <full billingWallet.address>`
-  - `Network: <billingWallet.networkLabel>`
-  - `OSWAP token: <full billingWallet.tokenAddress>`
-  - `Billing vault: <full billingWallet.vaultAddress>`
-- Avoid phrasing like `8 OSWAP deposit into billing vault` without first saying whether the user needs to deposit BNB or already has enough OSWAP.
-- Avoid phrasing like `Pair: ETH/USDC · Perps · Chain 999`; use a human label plus ID, e.g. `Pair: ETH/USDC · Perps · Hyperliquid Mainnet (chainId 999)`.
+- Show these full copyable lines by default:
+  - `Deposit network: <billingWallet.networkLabel>`
+  - `Deposit BNB to: <full billingWallet.address>`
+- Only show `OSWAP token` or other contract addresses if the user explicitly asks for technical details.
+- Avoid phrasing like `8 OSWAP deposit into billing vault` without first saying what the 8 OSWAP is for.
+- Avoid phrasing like `Pair: ETH/USDC · Perps · Hyperliquid Mainnet (chainId 999)`; use plain network names only.
 
 Ask the user to confirm. Do not proceed until they explicitly confirm.
 Confirmation rules:
