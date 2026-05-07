@@ -11,11 +11,18 @@ Supports all four scenarios — the copied agent can have a **different mode** a
 - **paper→live**: copy a paper agent as live (wallet required)
 - **live→paper**: copy a live agent as paper (no wallet needed)
 
+**Important for cross-chain copying:**
+When the source agent is on one chain (e.g., Hyperliquid Mainnet) and your wallet is on another (e.g., Hyperliquid Testnet), the tool will check balance on your wallet's network. 
+You may need to pass `chainId` explicitly if the source agent's chain cannot be auto-detected from your wallet.
+
+**Technical note on balance checking:** When setting up a live agent, the tool checks USDC balance on the **master wallet** (not the agent/API wallet) on the network where the trading will occur. The master wallet is the top-level wallet you control; the agent wallet is derived from it for API trading. Only the master wallet's balance matters for determining trading capital and limits.
+
 If the user has not stated a mode preference, the copy defaults to the source agent's mode.
 
 The source agent must be a **public** agent.
 
 ## Step 1 — Initialize session
+
 Call `init_trading_session` with `mode: "live"` to initialize keys and pre-load any wallets on file.
 
 Handle the response:
@@ -68,16 +75,19 @@ Handle the response:
 **Skip this step entirely if the effective mode is paper.**
 
 ### Resolve the chain
-- If `defaults.chainId` is available and the user hasn't requested a different chain, use it.
-- Otherwise ask the user which network to use. For Hyperliquid:
+
+- **For Hyperliquid**: The wallet's network (mainnet/testnet) takes priority for balance checking, even if the source agent is on a different chain. This allows copying from a paper mainnet agent to a live testnet agent.
+- If the source agent's chain is not clearly detected from the wallet, or if the user wants to override the wallet's network, ask the user which network to use. For Hyperliquid:
   - `testnet` → `998`
   - `mainnet` → `999`
 
 ### Resolve the wallet
+
 Filter the wallets from Step 1 to those on the resolved network.
 
 If wallets exist on that network:
 - Present them and ask which one to use. Never use a markdown table. Never abbreviate `0x...` values. Show `walletAddress` and `masterWalletAddress` as full monospace lines.
+- Verify that each wallet displays both `walletAddress` (the agent/API wallet) and `masterWalletAddress` (the master wallet for balance checking). If a wallet is missing `masterWalletAddress`, reject it and ask user to re-register it or provide the master wallet address explicitly.
 - Save `walletId`, `walletAddress`, and `masterWalletAddress`.
 
 If no wallet exists on the resolved network:
@@ -93,11 +103,12 @@ After the wallet is known, call `prepare_copy_agent` again with:
 - `mode` (effective mode)
 - `walletId`
 - optional `walletAddress`
-- optional `chainId` if overriding
+- optional `masterWalletAddress` if the wallet record doesn't have it (rare; only if wallet was set up without master wallet)
+- optional `chainId` if the user wants to override the wallet's network chain (e.g., testnet user wants to trade on mainnet)
 
 Use this second preflight to refresh the defaults before confirmation:
-- `defaults.buyLimit` should now reflect the normal live-agent formula from the selected wallet balance.
-- `defaults.initialCapital` should reflect the selected wallet's USDC balance.
+- `defaults.buyLimit` should now reflect the normal live-agent formula from the selected wallet balance (checked on the wallet's network).
+- `defaults.initialCapital` should reflect the selected wallet's USDC balance (on the wallet's network).
 - `defaults.leverage` should reflect the default live leverage used for the calculation.
 
 ## Step 4 — Ask only for copy-specific overrides
@@ -164,12 +175,13 @@ If billing is required and funding is still needed, follow this format instead o
 - Avoid phrasing like `Pair: ETH/USDC · Perps · Hyperliquid Mainnet (chainId 999)`; use plain network names only.
 
 Ask the user to confirm. Do not proceed until they explicitly confirm.
+
 Confirmation rules:
-  - The user's original request to copy or create the agent does **not** count as confirmation after the checkout is shown.
-  - You must ask a direct confirmation question after presenting the summary.
-  - Only proceed on an explicit reply such as `confirm`, `yes, create it`, `proceed`, or `done` after funding.
-  - If the user asks why a funding number is needed, answer with the billing breakdown and then ask for confirmation again.
-  - If `deploy_copy_agent` was called too early and returns a funding shortfall, explain the breakdown, acknowledge that deployment should have waited for confirmation, and return to the confirmation step.
+- The user's original request to copy or create the agent does **not** count as confirmation after the checkout is shown.
+- You must ask a direct confirmation question after presenting the summary.
+- Only proceed on an explicit reply such as `confirm`, `yes, create it`, `proceed`, or `done` after funding.
+- If the user asks why a funding number is needed, answer with the billing breakdown and then ask for confirmation again.
+- If `deploy_copy_agent` was called too early and returns a funding shortfall, explain the breakdown, acknowledge that deployment should have waited for confirmation, and return to the confirmation step.
 
 ## Step 6 — Deploy copied agent
 
@@ -193,3 +205,10 @@ Handle the response:
 - **authorizeWallet.ok = false** *(live mode only)*: Warn that wallet authorization failed — the agent was created but the wallet link may not be active yet.
 - **verify.ok = false**: Warn that post-creation verification did not fully succeed.
 - Present the new agent ID, source agent ID, pair, effective mode, and any warnings returned in `result.warnings`.
+
+## Updating an existing copied agent
+
+When a user asks to modify an already-copied agent, call `update_copied_agent`.
+- Use `copiedFromAgentId` to switch the followed source agent.
+- Use `walletAddress` (or `agentAddress`) when changing live wallet linkage; do not ask for `walletId`.
+- Use `alias`, `buyLimit`, and `order` for normal copy-trade setting changes.

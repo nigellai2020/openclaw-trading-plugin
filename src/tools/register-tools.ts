@@ -1049,6 +1049,113 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
+  api.registerTool({
+    name: "update_copied_agent",
+    description: "Update a copied agent via PUT /api/update-copied-agent. Supports changing alias, order, buyLimit, source agent, and wallet resolution by walletAddress/agentAddress.",
+    parameters: Type.Object({
+      agentId: Type.Number({ description: "Copied agent ID to update" }),
+      copiedFromAgentId: Type.Optional(Type.Number({ description: "Optional new public source agent ID to copy from" })),
+      alias: Type.Optional(Type.String({ description: "Updated display name for the copied agent" })),
+      buyLimit: Type.Optional(Type.Number({ description: "Updated buy limit in USD" })),
+      walletAddress: Type.Optional(Type.String({ description: "Wallet address used to resolve walletId server-side" })),
+      agentAddress: Type.Optional(Type.String({ description: "Fallback wallet address used to resolve walletId when walletAddress is omitted" })),
+      order: Type.Optional(CopyTradeOrderConfig),
+      settlementConfig: Type.Optional(Type.Any({ description: "Optional settlement config; object values are JSON-stringified before request" })),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        agentId: number;
+        copiedFromAgentId?: number;
+        alias?: string;
+        buyLimit?: number;
+        walletAddress?: string;
+        agentAddress?: string;
+        order?: {
+          type: string;
+          size: {
+            mode: string;
+            value?: number;
+          };
+        };
+        settlementConfig?: unknown;
+      },
+    ) {
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const signedAt = Math.floor(Date.now() / 1000);
+
+      const hasUpdatableField = [
+        "copiedFromAgentId",
+        "alias",
+        "buyLimit",
+        "walletAddress",
+        "agentAddress",
+        "order",
+        "settlementConfig",
+      ].some((field) => hasOwnField(params, field));
+
+      if (!hasUpdatableField) {
+        return textResult({ error: "At least one updatable field is required" });
+      }
+      if (params.copiedFromAgentId !== undefined && (!Number.isFinite(Number(params.copiedFromAgentId)) || Number(params.copiedFromAgentId) <= 0)) {
+        return textResult({ error: "copiedFromAgentId must be a positive number" });
+      }
+
+      const timestamp = Math.floor(Date.now() / 1000);
+      const signature = buildAgentActionSignature(
+        privateKey,
+        publicKey,
+        params.agentId,
+        "update",
+        timestamp,
+      );
+      const xSignature = Signer.getSignature(
+        { agent_id: params.agentId, signed_at: signedAt },
+        privateKey,
+        { agent_id: "number", signed_at: "number" } as const,
+      );
+
+      const body: Record<string, unknown> = {
+        id: params.agentId,
+        signature,
+        timestamp,
+        signed_at: signedAt,
+      };
+      if (hasOwnField(params, "copiedFromAgentId")) body.copiedFromAgentId = params.copiedFromAgentId;
+      if (hasOwnField(params, "alias")) body.alias = params.alias;
+      if (hasOwnField(params, "buyLimit")) body.buyLimit = params.buyLimit;
+      if (hasOwnField(params, "walletAddress")) body.walletAddress = params.walletAddress;
+      if (hasOwnField(params, "agentAddress")) body.agentAddress = params.agentAddress;
+      if (hasOwnField(params, "order")) body.order = params.order;
+      if (hasOwnField(params, "settlementConfig")) {
+        body.settlement_config = typeof params.settlementConfig === "string"
+          ? params.settlementConfig
+          : JSON.stringify(params.settlementConfig);
+      }
+
+      debugLog("update_copied_agent", "req", { body });
+      const res = await fetch(`${baseUrl}/api/update-copied-agent`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: auth,
+          "x-public-key": publicKey,
+          "x-signature": xSignature,
+        },
+        body: JSON.stringify(body),
+      });
+      const responseBody = await parseResponseBody(res);
+      const result = {
+        ok: res.ok && responseBody?.success !== false,
+        status: res.status,
+        body: responseBody,
+      };
+      debugLog("update_copied_agent", "res", result);
+      return textResult(result);
+    },
+  });
+
   // ── Composite tools ────────────────────────────────────────────
 
   api.registerTool({
@@ -1303,6 +1410,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       chainId: Type.Optional(Type.Number({ description: "Optional chain ID override. Defaults to source agent's chain ID." })),
       walletId: Type.Optional(Type.Number({ description: "Optional wallet ID to preview against (live mode)" })),
       walletAddress: Type.Optional(Type.String({ description: "Optional wallet address override used together with walletId preview" })),
+      masterWalletAddress: Type.Optional(Type.String({ description: "Optional master wallet address (live mode). Required for balance checking. If not provided, fetched from wallet record." })),
     }),
     async execute(
       _id: string,
@@ -1310,6 +1418,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         sourceAgentId: number;
         mode?: "live" | "paper";
         alias?: string;
+          masterWalletAddress?: string;
         chainId?: number;
         walletId?: number;
         walletAddress?: string;
@@ -1398,11 +1507,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       let inferredProtocol: string | undefined;
       let walletPreview: Record<string, unknown> | undefined;
       let walletWarning: string | undefined;
-      let resolvedPreviewChainId = params.chainId !== undefined ? params.chainId : sourceChainId;
+      let resolvedPreviewChainId: number | null = null;
       let walletDerivedBuyLimit: { initialCapital: number; leverage: number; buyLimit: number } | null = null;
-      if (resolvedPreviewChainId != null) {
+      
+      // For protocol inference when chainId is explicitly provided:
+      if (params.chainId != null) {
         try {
-          inferredProtocol = await fetchSettlementProtocolName(sourceMarketType, resolvedPreviewChainId);
+          inferredProtocol = await fetchSettlementProtocolName(sourceMarketType, params.chainId);
         } catch (e: any) {
           walletWarning = `Could not infer settlement protocol from instruments: ${e.message}`;
         }
@@ -1425,16 +1536,32 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           const resolvedWalletAddress = typeof walletRecord.wallet_address === "string"
             ? walletRecord.wallet_address
             : params.walletAddress;
-          const resolvedMasterWalletAddress = typeof walletRecord.master_wallet_address === "string" && walletRecord.master_wallet_address.trim()
-            ? walletRecord.master_wallet_address
-            : resolvedWalletAddress;
 
-          if (resolvedPreviewChainId == null) {
+          const resolvedMasterWalletAddress = params.masterWalletAddress
+            ? params.masterWalletAddress
+            : typeof walletRecord.master_wallet_address === "string" && walletRecord.master_wallet_address.trim()
+              ? walletRecord.master_wallet_address
+              : null;
+
+          if (!resolvedMasterWalletAddress) {
+            return textResult({
+              ...result,
+              error: `Wallet preview failed: wallet ${resolvedWalletAddress ?? walletRecord.id} does not have a master wallet address configured. For live agents, the master wallet address is required to check balance. Either re-register your wallet with the master address, or pass masterWalletAddress parameter explicitly to prepare_copy_agent.`,
+            });
+          }
+
+          // Chain resolution: explicit override > wallet network > source agent chain
+          if (params.chainId !== undefined) {
+            resolvedPreviewChainId = params.chainId;
+          } else if (resolvedPreviewChainId == null && walletRecord.hyperliquid_network) {
             if (walletRecord.hyperliquid_network === "mainnet") {
               resolvedPreviewChainId = 999;
             } else if (walletRecord.hyperliquid_network === "testnet") {
               resolvedPreviewChainId = 998;
             }
+          }
+          if (resolvedPreviewChainId == null && sourceChainId != null) {
+            resolvedPreviewChainId = sourceChainId;
           }
 
           if (resolvedPreviewChainId != null && Array.isArray(walletRecord.authorized_agents)) {
@@ -2564,30 +2691,19 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       // Step 7: Verify agent
       try {
-        const [agentRes, settingsRes] = await Promise.all([
-          fetch(`${baseUrl}/api/agent/${copiedAgentId}`, {
-            headers: { Authorization: auth },
-          }),
-          fetch(`${baseUrl}/api/agent/settings/${copiedAgentId}`, {
-            headers: { Authorization: auth },
-          }),
-        ]);
-        const [agentBody, settingsBody] = await Promise.all([
-          parseResponseBody(agentRes),
-          parseResponseBody(settingsRes),
-        ]);
+        const agentRes = await fetch(`${baseUrl}/api/agent/${copiedAgentId}`, {
+          headers: { Authorization: auth },
+        });
+        const agentBody = await parseResponseBody(agentRes);
         debugLog("deploy_copy_agent", "verify.api.res", {
           agentStatus: agentRes.status,
           agentBody,
-          settingsStatus: settingsRes.status,
-          settingsBody,
         });
         result.verify = {
-          ok: agentRes.ok && settingsRes.ok,
+          ok: agentRes.ok,
           agent: agentBody,
-          settings: settingsBody,
         };
-        if (!agentRes.ok || !settingsRes.ok) {
+        if (!agentRes.ok) {
           warnings.push("Verification after copy deployment did not fully succeed.");
         }
       } catch (e: any) {
