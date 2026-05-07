@@ -1303,6 +1303,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       chainId: Type.Optional(Type.Number({ description: "Optional chain ID override. Defaults to source agent's chain ID." })),
       walletId: Type.Optional(Type.Number({ description: "Optional wallet ID to preview against (live mode)" })),
       walletAddress: Type.Optional(Type.String({ description: "Optional wallet address override used together with walletId preview" })),
+      masterWalletAddress: Type.Optional(Type.String({ description: "Optional master wallet address (live mode). Required for balance checking. If not provided, fetched from wallet record." })),
     }),
     async execute(
       _id: string,
@@ -1310,6 +1311,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         sourceAgentId: number;
         mode?: "live" | "paper";
         alias?: string;
+          masterWalletAddress?: string;
         chainId?: number;
         walletId?: number;
         walletAddress?: string;
@@ -1398,11 +1400,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       let inferredProtocol: string | undefined;
       let walletPreview: Record<string, unknown> | undefined;
       let walletWarning: string | undefined;
-      let resolvedPreviewChainId = params.chainId !== undefined ? params.chainId : sourceChainId;
+      let resolvedPreviewChainId: number | null = null;
       let walletDerivedBuyLimit: { initialCapital: number; leverage: number; buyLimit: number } | null = null;
-      if (resolvedPreviewChainId != null) {
+      
+      // For protocol inference when chainId is explicitly provided:
+      if (params.chainId != null) {
         try {
-          inferredProtocol = await fetchSettlementProtocolName(sourceMarketType, resolvedPreviewChainId);
+          inferredProtocol = await fetchSettlementProtocolName(sourceMarketType, params.chainId);
         } catch (e: any) {
           walletWarning = `Could not infer settlement protocol from instruments: ${e.message}`;
         }
@@ -1425,16 +1429,32 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           const resolvedWalletAddress = typeof walletRecord.wallet_address === "string"
             ? walletRecord.wallet_address
             : params.walletAddress;
-          const resolvedMasterWalletAddress = typeof walletRecord.master_wallet_address === "string" && walletRecord.master_wallet_address.trim()
-            ? walletRecord.master_wallet_address
-            : resolvedWalletAddress;
 
-          if (resolvedPreviewChainId == null) {
+          const resolvedMasterWalletAddress = params.masterWalletAddress
+            ? params.masterWalletAddress
+            : typeof walletRecord.master_wallet_address === "string" && walletRecord.master_wallet_address.trim()
+              ? walletRecord.master_wallet_address
+              : null;
+
+          if (!resolvedMasterWalletAddress) {
+            return textResult({
+              ...result,
+              error: `Wallet preview failed: wallet ${resolvedWalletAddress ?? walletRecord.id} does not have a master wallet address configured. For live agents, the master wallet address is required to check balance. Either re-register your wallet with the master address, or pass masterWalletAddress parameter explicitly to prepare_copy_agent.`,
+            });
+          }
+
+          // Chain resolution: explicit override > wallet network > source agent chain
+          if (params.chainId !== undefined) {
+            resolvedPreviewChainId = params.chainId;
+          } else if (resolvedPreviewChainId == null && walletRecord.hyperliquid_network) {
             if (walletRecord.hyperliquid_network === "mainnet") {
               resolvedPreviewChainId = 999;
             } else if (walletRecord.hyperliquid_network === "testnet") {
               resolvedPreviewChainId = 998;
             }
+          }
+          if (resolvedPreviewChainId == null && sourceChainId != null) {
+            resolvedPreviewChainId = sourceChainId;
           }
 
           if (resolvedPreviewChainId != null && Array.isArray(walletRecord.authorized_agents)) {
