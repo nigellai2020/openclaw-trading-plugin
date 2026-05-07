@@ -205,3 +205,10 @@ Handle the response:
 - **authorizeWallet.ok = false** *(live mode only)*: Warn that wallet authorization failed — the agent was created but the wallet link may not be active yet.
 - **verify.ok = false**: Warn that post-creation verification did not fully succeed.
 - Present the new agent ID, source agent ID, pair, effective mode, and any warnings returned in `result.warnings`.
+
+## Updating an existing copied agent
+
+When a user asks to modify an already-copied agent, call `update_copied_agent`.
+- Use `copiedFromAgentId` to switch the followed source agent.
+- Use `walletAddress` (or `agentAddress`) when changing live wallet linkage; do not ask for `walletId`.
+- Use `alias`, `buyLimit`, and `order` for normal copy-trade setting changes.

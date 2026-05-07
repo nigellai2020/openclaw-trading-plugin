@@ -1049,6 +1049,113 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
+  api.registerTool({
+    name: "update_copied_agent",
+    description: "Update a copied agent via PUT /api/update-copied-agent. Supports changing alias, order, buyLimit, source agent, and wallet resolution by walletAddress/agentAddress.",
+    parameters: Type.Object({
+      agentId: Type.Number({ description: "Copied agent ID to update" }),
+      copiedFromAgentId: Type.Optional(Type.Number({ description: "Optional new public source agent ID to copy from" })),
+      alias: Type.Optional(Type.String({ description: "Updated display name for the copied agent" })),
+      buyLimit: Type.Optional(Type.Number({ description: "Updated buy limit in USD" })),
+      walletAddress: Type.Optional(Type.String({ description: "Wallet address used to resolve walletId server-side" })),
+      agentAddress: Type.Optional(Type.String({ description: "Fallback wallet address used to resolve walletId when walletAddress is omitted" })),
+      order: Type.Optional(CopyTradeOrderConfig),
+      settlementConfig: Type.Optional(Type.Any({ description: "Optional settlement config; object values are JSON-stringified before request" })),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        agentId: number;
+        copiedFromAgentId?: number;
+        alias?: string;
+        buyLimit?: number;
+        walletAddress?: string;
+        agentAddress?: string;
+        order?: {
+          type: string;
+          size: {
+            mode: string;
+            value?: number;
+          };
+        };
+        settlementConfig?: unknown;
+      },
+    ) {
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const signedAt = Math.floor(Date.now() / 1000);
+
+      const hasUpdatableField = [
+        "copiedFromAgentId",
+        "alias",
+        "buyLimit",
+        "walletAddress",
+        "agentAddress",
+        "order",
+        "settlementConfig",
+      ].some((field) => hasOwnField(params, field));
+
+      if (!hasUpdatableField) {
+        return textResult({ error: "At least one updatable field is required" });
+      }
+      if (params.copiedFromAgentId !== undefined && (!Number.isFinite(Number(params.copiedFromAgentId)) || Number(params.copiedFromAgentId) <= 0)) {
+        return textResult({ error: "copiedFromAgentId must be a positive number" });
+      }
+
+      const timestamp = Math.floor(Date.now() / 1000);
+      const signature = buildAgentActionSignature(
+        privateKey,
+        publicKey,
+        params.agentId,
+        "update",
+        timestamp,
+      );
+      const xSignature = Signer.getSignature(
+        { agent_id: params.agentId, signed_at: signedAt },
+        privateKey,
+        { agent_id: "number", signed_at: "number" } as const,
+      );
+
+      const body: Record<string, unknown> = {
+        id: params.agentId,
+        signature,
+        timestamp,
+        signed_at: signedAt,
+      };
+      if (hasOwnField(params, "copiedFromAgentId")) body.copiedFromAgentId = params.copiedFromAgentId;
+      if (hasOwnField(params, "alias")) body.alias = params.alias;
+      if (hasOwnField(params, "buyLimit")) body.buyLimit = params.buyLimit;
+      if (hasOwnField(params, "walletAddress")) body.walletAddress = params.walletAddress;
+      if (hasOwnField(params, "agentAddress")) body.agentAddress = params.agentAddress;
+      if (hasOwnField(params, "order")) body.order = params.order;
+      if (hasOwnField(params, "settlementConfig")) {
+        body.settlement_config = typeof params.settlementConfig === "string"
+          ? params.settlementConfig
+          : JSON.stringify(params.settlementConfig);
+      }
+
+      debugLog("update_copied_agent", "req", { body });
+      const res = await fetch(`${baseUrl}/api/update-copied-agent`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: auth,
+          "x-public-key": publicKey,
+          "x-signature": xSignature,
+        },
+        body: JSON.stringify(body),
+      });
+      const responseBody = await parseResponseBody(res);
+      const result = {
+        ok: res.ok && responseBody?.success !== false,
+        status: res.status,
+        body: responseBody,
+      };
+      debugLog("update_copied_agent", "res", result);
+      return textResult(result);
+    },
+  });
+
   // ── Composite tools ────────────────────────────────────────────
 
   api.registerTool({

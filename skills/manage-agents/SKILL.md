@@ -21,6 +21,13 @@ If the user asks about billing subscriptions, renewal status, or next billing da
 5. If the requested change touches live runtime fields (`walletId`, `walletAddress`, `masterWalletAddress`, `symbol`, `chainId`, `protocol`, `buyLimit`) and the tool reports missing companion fields, ask the user only for the missing companion fields needed to safely rebuild the live config.
 6. Report the `tradingData` result. If the tool returns `warnings`, surface them verbatim.
 
+## Update a copied agent
+1. If the user is updating a copied/followed agent, use `update_copied_agent` (not `update_agent`).
+2. Supported copied-agent fields include: `alias`, `buyLimit`, `order`, `walletAddress`, `agentAddress`, and `copiedFromAgentId`.
+3. For wallet changes, do not ask for `walletId`; the backend resolves it from `walletAddress` or `agentAddress`.
+4. If the user wants to switch which source agent is followed, pass `copiedFromAgentId`.
+5. Report whether the tool returned `ok: true`. If false, show the backend error message and stop.
+
 ## Delete an agent
 1. If the user hasn't specified an agent ID, call `list_my_agents` first and ask which one to delete.
 2. Confirm with the user before deleting — show the agent name and ID.
