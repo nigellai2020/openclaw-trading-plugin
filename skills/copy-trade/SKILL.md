@@ -148,6 +148,8 @@ If billing is required and funding is still needed, follow this format instead o
 - Always add the numeric breakdown that leads to the BNB total. Example wording:
   - `First billing amount: <fees.firstBillingAmount> OSWAP = <non-zero components only>`
   - Example when strategy fee is zero: `operating <fees.operatingFee> + protocol <fees.protocolFee>`
+  - Do **not** append literal notes like `(strategy fee is 0, not shown)`.
+  - Keep the fee line clean and retail-friendly: include only the non-zero components and stop there.
   - `This first billing amount is your first billing period charge (not a trading fee).`
   - `You already have <fees.existingVaultCredit> OSWAP billing credit; this setup adds <fees.oswapForInitialVaultCredit> OSWAP credit for the first period.`
   - `NFT: <fees.oswapForNft> OSWAP`
