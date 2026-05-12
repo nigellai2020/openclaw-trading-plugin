@@ -3144,10 +3144,28 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         Type.Literal("1m"),
       ], { description: "Backtest period: 1d (daily), 1w (weekly), 1m (monthly)" }),
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50, default: 10, description: "Number of top agents to return (default 10, max 50)" })),
+      chain: Type.Optional(Type.Number({ description: "Filter by blockchain chain ID (e.g., 1 for Ethereum, 56 for BSC)" })),
+      pair: Type.Optional(Type.String({ description: "Filter by trading pair symbol (e.g., 'ETH/USDC')" })),
+      mode: Type.Optional(Type.Union([
+        Type.Literal("live"),
+        Type.Literal("paper"),
+      ], { description: "Filter by trading mode: live or paper" })),
+      marketType: Type.Optional(Type.Union([
+        Type.Literal("spot"),
+        Type.Literal("perp"),
+      ], { description: "Filter by market type: spot or perp" })),
     }),
-    async execute(_id: string, params: { period: string; limit?: number }) {
+    async execute(_id: string, params: { period: string; limit?: number; chain?: number; pair?: string; mode?: string; marketType?: string }) {
       const limit = params.limit ?? 10;
-      const res = await fetch(`${baseUrl}/api/backtest-leaderboard?period=${params.period}&limit=${limit}`);
+      const url = new URL(`${baseUrl}/api/backtest-leaderboard`);
+      url.searchParams.append('period', params.period);
+      url.searchParams.append('limit', limit.toString());
+      if (params.chain !== undefined) url.searchParams.append('chain', params.chain.toString());
+      if (params.pair !== undefined) url.searchParams.append('pair', params.pair);
+      if (params.mode !== undefined) url.searchParams.append('mode', params.mode);
+      if (params.marketType !== undefined) url.searchParams.append('marketType', params.marketType);
+
+      const res = await fetch(url.toString());
       const body = await res.json();
       if (!res.ok) throw new Error(`backtest_leader_board failed: ${res.status} ${responseErrorMessage(body)}`);
 
