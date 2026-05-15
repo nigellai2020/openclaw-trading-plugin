@@ -1708,6 +1708,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         result.verify = { ok: false };
       }
 
+      if (result.verify && !(result.verify as { ok?: boolean }).ok) {
+        result.error = result.error ?? "Agent creation completed but verification failed";
+      }
+
       if (billingRequired && billingWallet) {
         try {
           const [postBalance, subscriptions] = await Promise.all([
