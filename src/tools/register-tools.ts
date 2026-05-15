@@ -805,22 +805,28 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "leverage",
         "strategyFeePerPeriod",
       ];
-      const settlementConfigFieldKeys = [
+      // Settlement-specific fields (excluding chainId which is needed for both paper and live)
+      const settlementSpecificFields = [
         "walletId",
         "walletAddress",
         "masterWalletAddress",
         "symbol",
-        "chainId",
         "protocol",
         "buyLimit",
+      ];
+      const settlementConfigFieldKeys = [
+        ...settlementSpecificFields,
+        "chainId",  // For backwards compatibility in field list
       ];
 
       if (hasOwnField(params, "walletId")) {
         warnings.push("walletId is used only to resolve walletAddress/masterWalletAddress; there is no direct walletId update endpoint for agents.");
       }
 
+      // needsSettlementConfig = true if updating settlement-specific fields OR transitioning to live
+      // chainId alone does NOT trigger settlement config (it's also used for paper simulation)
       const needsSettlementConfig =
-        settlementConfigFieldKeys.some((field) => hasOwnField(params, field)) ||
+        settlementSpecificFields.some((field) => hasOwnField(params, field)) ||
         (hasOwnField(params, "mode") && targetMode === "live") ||
         (hasOwnField(params, "marketType") && targetMode === "live");
 
