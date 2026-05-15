@@ -1710,6 +1710,26 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       if (result.verify && !(result.verify as { ok?: boolean }).ok) {
         result.error = result.error ?? "Agent creation completed but verification failed";
+        result.success = false;
+        const validAgentId = typeof (agentId as any) === 'number' && !Number.isNaN(agentId as any);
+        if (!validAgentId) {
+          // Server returned 200 but no agentId — agent does not exist; null out misleading fields
+          (result.create as any).ok = false;
+          (result.create as any).agentId = null;
+          (result.create as any).agentUrl = null;
+          result.agentId = null;
+          result.criticalNote =
+            "NO_AGENT_CREATED: The server did not return a valid agent ID. No agent was confirmed to exist. " +
+            "Do NOT tell the user an agent was successfully created. " +
+            "Do NOT fabricate or guess an agent ID. " +
+            "Report this as a failure and ask the user to try again.";
+        } else {
+          result.agentId = agentId;
+          result.criticalNote =
+            `UNVERIFIED_AGENT: Agent ID ${agentId} was assigned by the server but could not be immediately confirmed. ` +
+            `Inform the user that creation was submitted with ID ${agentId} but verification is pending. ` +
+            `Advise them to run list_my_agents to confirm before using the agent.`;
+        }
       }
 
       if (billingRequired && billingWallet) {
