@@ -61,8 +61,41 @@ export function createToolsContext(api: any) {
     } catch {}
   }
 
+  const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+  const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
+  const INTEGER_PATTERN = /^-?\d+$/;
+
+  function toSafeInteger(value: string): number | undefined {
+    if (!INTEGER_PATTERN.test(value)) return undefined;
+    try {
+      const big = BigInt(value);
+      if (big > MAX_SAFE_BIGINT || big < MIN_SAFE_BIGINT) return undefined;
+      return Number(big);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function normalizeSafeIntegers<T>(value: T): T {
+    if (value === null || value === undefined) return value;
+    if (typeof value === "string") {
+      const converted = toSafeInteger(value);
+      return (converted === undefined ? value : converted) as T;
+    }
+    if (typeof value !== "object") return value;
+    if (Array.isArray(value)) {
+      return value.map((item) => normalizeSafeIntegers(item)) as T;
+    }
+
+    const normalized: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      normalized[key] = normalizeSafeIntegers(nested);
+    }
+    return normalized as T;
+  }
+
   function extractApiData<T = any>(body: any): T {
-    return (body?.data ?? body) as T;
+    return normalizeSafeIntegers((body?.data ?? body) as T);
   }
 
   function responseErrorMessage(body: any): string {

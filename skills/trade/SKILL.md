@@ -1,13 +1,13 @@
 ---
 name: trade
-description: Create a new paper or live trading agent. Use when the user wants to start trading, deploy a new trading agent, set up paper trading, or trade on Hyperliquid or EVM networks. Do not use this skill to copy an existing agent.
+description: Create a new paper or live trading agent, including copying an existing public agent. Use when the user wants to start trading, deploy a new trading agent, set up paper trading, trade on Hyperliquid or EVM networks, or copy/follow an existing public agent.
 ---
 
 # Trading Agent Creation
 
-Follow these steps to create a paper or live trading agent.
+Follow these steps to create a paper or live trading agent. This skill covers both **original agents** (user-defined strategy) and **copy agents** (copying an existing public agent).
 
-If the user wants to copy, follow, or duplicate an existing agent, use the `copy-trade` skill instead of this one.
+**Copy-agent path:** If the user wants to copy, follow, or duplicate an existing agent, that is handled by this same skill. When in copy mode, Steps 1–4 are the same, Step 5 (Build strategy) is **skipped** (the strategy is inherited from the source agent), and the `sourceAgentId` is passed to `prepare_agent_creation` and `deploy_agent` instead of a strategy object.
 
 ## Step 1 — Ask trading mode and resolve market/network
 Ask the user: **paper** or **live** mode?
@@ -56,8 +56,11 @@ Handle the response:
 - **registration.ok = false**: Report the error and STOP.
 - Save `teeStorage.agentWalletAddress`, `registration.walletId`, and `registration.walletAddress`.
 
-## Step 5 — Build strategy
-Ask the user for an agent name if they have not already provided one.
+## Step 5 — Build strategy _(skip for copy agents)_
+
+**Copy-agent path:** If the user is copying an existing agent, skip this entire step. Ask for the source agent ID (or search by name using `search_public_agents` if needed). Record it as `sourceAgentId`. The strategy is inherited from the source agent — do not ask the user for a strategy.
+
+**Original-agent path:** Ask the user for an agent name if they have not already provided one.
 
 Ask the user what trading strategy they want. Construct a strategy object with:
 - **indicators**: technical indicators with type, name, period, timeframe, and params
@@ -96,8 +99,9 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 - Explain that the plugin loads all active NFT configs from `/api/nft-config` and only uses the cheapest eligible NFT when a new mint is required.
 - `prepare_agent_creation` is a **read-only preflight**. It does **not** authorize deployment. After calling it, your next message must present the summary and ask for confirmation. Do **not** call `deploy_agent` in the same turn as the preflight.
 - Call `prepare_agent_creation` with:
-  - Paper: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
-  - Live: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
+  - Paper original: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
+  - Live original: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
+  - Copy agent: `name`, `mode`, and `sourceAgentId` — do **not** pass `marketType` or `symbol` (they are resolved from the source agent)
 - If `prepare_agent_creation.billing.required = false`, say no upfront billing setup is required and skip to Step 8.
 - If `prepare_agent_creation.billing.required = true`, present the checkout page described below.
 - If `prepare_agent_creation` reports an `error`, STOP and explain it.
@@ -221,11 +225,12 @@ Confirmation rules:
 
 ## Step 9 — Deploy agent
 Call `deploy_agent` with:
-- `name`, `strategy`, `mode`, `marketType`
+- `name`, `mode`, `marketType`
 - `assetType`: always pass `"crypto"` or `"stocks"`
 - `chainId`: **required when `assetType` is `"crypto"`** — pass for both paper and live modes
 - `symbol`: always pass when known
-- If perp: `leverage` (same as `strategy.risk_manager.leverage`)
+- **Original agent:** also pass `strategy`; if perp: `leverage` (same as `strategy.risk_manager.leverage`)
+- **Copy agent:** pass `sourceAgentId` instead of `strategy` — do **not** pass a `strategy` object
 - Paper: `initialCapital`
 - Live: `walletAddress`, `masterWalletAddress`. For Hyperliquid (chainId 998/999), `initialCapital` is auto-fetched from the wallet balance — do NOT pass it. For other networks, pass `initialCapital` explicitly.
 

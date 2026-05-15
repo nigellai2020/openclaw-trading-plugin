@@ -13,7 +13,7 @@ import {
   createToolsContext,
   type ToolsContext,
 } from "../context/create-tools-context.js";
-import { CopyTradeOrderConfig, SimulationConfig, SimulationConfigPatch, Strategy } from "../schemas/strategy.js";
+import { SimulationConfig, SimulationConfigPatch, Strategy } from "../schemas/strategy.js";
 import { registerFillNotifications } from "./register-fill-notifications.js";
 import type { EthHeaders, PreparedAgentCreationContext } from "../types/billing.js";
 import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
@@ -597,6 +597,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       slippage: Type.Optional(Type.Number({ description: "Updated settlement slippage tolerance" })),
       expiration: Type.Optional(Type.Number({ description: "Updated settlement transaction expiration in seconds" })),
       isPrivate: Type.Optional(Type.Boolean({ description: 'Change agent visibility. false makes a private agent public (irreversible). Setting true on an already-public agent is rejected with 400. Copy agents can never be made public.' })),
+      copiedFromAgentId: Type.Optional(Type.Number({ description: "Change the source agent this copied agent follows. The source agent must be public. Triggers automatic strategy sync on the backend." })),
     }),
     async execute(
       _id: string,
@@ -628,6 +629,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         slippage?: number;
         expiration?: number;
         isPrivate?: boolean;
+        copiedFromAgentId?: number;
       },
     ) {
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
@@ -656,6 +658,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "slippage",
         "expiration",
         "isPrivate",
+        "copiedFromAgentId",
       ].filter((field) => hasOwnField(params, field));
 
       if (requestedFields.length === 0) {
@@ -997,6 +1000,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (hasOwnField(params, "protocol")) body.protocol = params.protocol;
         if (settlementConfigPayload) body.settlement_config = settlementConfigPayload;
         if (hasOwnField(params, "isPrivate")) body.isPrivate = params.isPrivate;
+        if (hasOwnField(params, "copiedFromAgentId")) body.copiedFromAgentId = params.copiedFromAgentId;
 
         debugLog("update_agent", "trading-data.req", { url: `${baseUrl}/api/agent`, body, hasBillingHeaders: Object.keys(billingHeaders).length > 0 });
         const res = await fetch(`${baseUrl}/api/agent`, {
@@ -1045,113 +1049,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       result.warnings = Array.from(new Set(warnings));
       debugLog("update_agent", "result", result);
-      return textResult(result);
-    },
-  });
-
-  api.registerTool({
-    name: "update_copied_agent",
-    description: "Update a copied agent via PUT /api/update-copied-agent. Supports changing alias, order, buyLimit, source agent, and wallet resolution by walletAddress/agentAddress.",
-    parameters: Type.Object({
-      agentId: Type.Number({ description: "Copied agent ID to update" }),
-      copiedFromAgentId: Type.Optional(Type.Number({ description: "Optional new public source agent ID to copy from" })),
-      alias: Type.Optional(Type.String({ description: "Updated display name for the copied agent" })),
-      buyLimit: Type.Optional(Type.Number({ description: "Updated buy limit in USD" })),
-      walletAddress: Type.Optional(Type.String({ description: "Wallet address used to resolve walletId server-side" })),
-      agentAddress: Type.Optional(Type.String({ description: "Fallback wallet address used to resolve walletId when walletAddress is omitted" })),
-      order: Type.Optional(CopyTradeOrderConfig),
-      settlementConfig: Type.Optional(Type.Any({ description: "Optional settlement config; object values are JSON-stringified before request" })),
-    }),
-    async execute(
-      _id: string,
-      params: {
-        agentId: number;
-        copiedFromAgentId?: number;
-        alias?: string;
-        buyLimit?: number;
-        walletAddress?: string;
-        agentAddress?: string;
-        order?: {
-          type: string;
-          size: {
-            mode: string;
-            value?: number;
-          };
-        };
-        settlementConfig?: unknown;
-      },
-    ) {
-      const { privateKey, publicKey } = loadKeys(pluginConfig);
-      const auth = getAuthHeader(publicKey, privateKey);
-      const signedAt = Math.floor(Date.now() / 1000);
-
-      const hasUpdatableField = [
-        "copiedFromAgentId",
-        "alias",
-        "buyLimit",
-        "walletAddress",
-        "agentAddress",
-        "order",
-        "settlementConfig",
-      ].some((field) => hasOwnField(params, field));
-
-      if (!hasUpdatableField) {
-        return textResult({ error: "At least one updatable field is required" });
-      }
-      if (params.copiedFromAgentId !== undefined && (!Number.isFinite(Number(params.copiedFromAgentId)) || Number(params.copiedFromAgentId) <= 0)) {
-        return textResult({ error: "copiedFromAgentId must be a positive number" });
-      }
-
-      const timestamp = Math.floor(Date.now() / 1000);
-      const signature = buildAgentActionSignature(
-        privateKey,
-        publicKey,
-        params.agentId,
-        "update",
-        timestamp,
-      );
-      const xSignature = Signer.getSignature(
-        { agent_id: params.agentId, signed_at: signedAt },
-        privateKey,
-        { agent_id: "number", signed_at: "number" } as const,
-      );
-
-      const body: Record<string, unknown> = {
-        id: params.agentId,
-        signature,
-        timestamp,
-        signed_at: signedAt,
-      };
-      if (hasOwnField(params, "copiedFromAgentId")) body.copiedFromAgentId = params.copiedFromAgentId;
-      if (hasOwnField(params, "alias")) body.alias = params.alias;
-      if (hasOwnField(params, "buyLimit")) body.buyLimit = params.buyLimit;
-      if (hasOwnField(params, "walletAddress")) body.walletAddress = params.walletAddress;
-      if (hasOwnField(params, "agentAddress")) body.agentAddress = params.agentAddress;
-      if (hasOwnField(params, "order")) body.order = params.order;
-      if (hasOwnField(params, "settlementConfig")) {
-        body.settlement_config = typeof params.settlementConfig === "string"
-          ? params.settlementConfig
-          : JSON.stringify(params.settlementConfig);
-      }
-
-      debugLog("update_copied_agent", "req", { body });
-      const res = await fetch(`${baseUrl}/api/update-copied-agent`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: auth,
-          "x-public-key": publicKey,
-          "x-signature": xSignature,
-        },
-        body: JSON.stringify(body),
-      });
-      const responseBody = await parseResponseBody(res);
-      const result = {
-        ok: res.ok && responseBody?.success !== false,
-        status: res.status,
-        body: responseBody,
-      };
-      debugLog("update_copied_agent", "res", result);
       return textResult(result);
     },
   });
@@ -1355,12 +1252,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "prepare_agent_creation",
-    description: "Read-only preflight for direct agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction. OpenClaw must present this result to the user and get explicit confirmation before calling deploy_agent.",
+    description: "Read-only preflight for agent creation (direct or copy). Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction. OpenClaw must present this result to the user and get explicit confirmation before calling deploy_agent.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
       marketType: Type.Optional(Type.String({ description: '"spot" or "perp"', default: "spot" })),
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
+      sourceAgentId: Type.Optional(Type.Number({ description: "When copying an existing public agent, pass the source agent ID. symbol and marketType are resolved from the source; do not pass them separately." })),
     }),
     async execute(
       _id: string,
@@ -1369,6 +1267,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         mode?: string;
         marketType?: string;
         symbol?: string;
+        sourceAgentId?: number;
       },
     ) {
       const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
@@ -1377,8 +1276,53 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         mode: params.mode ?? "paper",
         marketType: params.marketType ?? "spot",
         symbol: params.symbol,
+        sourceAgentId: params.sourceAgentId,
         usesNostrPrivateKey: true,
       });
+      if (params.sourceAgentId) {
+        let sourceAgent: any;
+        try {
+          sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId);
+        } catch (e: any) {
+          return textResult({ error: e.message });
+        }
+        const sourceSymbol = typeof sourceAgent?.pair === "string" && sourceAgent.pair.trim()
+          ? sourceAgent.pair.trim()
+          : typeof sourceAgent?.symbol === "string" && sourceAgent.symbol.trim()
+            ? sourceAgent.symbol.trim()
+            : undefined;
+        if (!sourceSymbol) {
+          return textResult({ error: `Source agent ${params.sourceAgentId} is missing a trading pair; cannot prepare copy deployment` });
+        }
+        const sourceMarketType: "spot" | "perp" = sourceAgent?.marketType === "perp" ? "perp" : "spot";
+        const effectiveMode: string = params.mode ?? sourceAgent?.mode ?? "paper";
+        try {
+          const prepared = await prepareAgentCreationContext({
+            name: params.name,
+            mode: effectiveMode,
+            marketType: sourceMarketType,
+            symbol: sourceSymbol,
+            agentId: params.sourceAgentId,
+            npub,
+            publicKey,
+            privateKey,
+          });
+          return textResult({
+            ...prepared.prepared,
+            sourceAgent: {
+              id: params.sourceAgentId,
+              name: sourceAgent?.name ?? null,
+              pair: sourceSymbol,
+              mode: sourceAgent?.mode ?? null,
+              marketType: sourceMarketType,
+            },
+            confirmationRequired: true,
+            nextStep: "present_checkout_and_wait_for_explicit_confirmation",
+          });
+        } catch (e: any) {
+          return textResult({ error: e.message });
+        }
+      }
       try {
         const prepared = await prepareAgentCreationContext({
           name: params.name,
@@ -1400,325 +1344,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
-  api.registerTool({
-    name: "prepare_copy_agent",
-    description: "Read-only preflight for creating a copy-trading agent (live or paper) from an existing public source agent. Mirrors the normal agent creation preflight, including any required billing setup before calling /api/copy-agent. For paper mode, wallet preview steps are optional. OpenClaw must present the returned summary and get explicit confirmation before calling deploy_copy_agent.",
-    parameters: Type.Object({
-      sourceAgentId: Type.Number({ description: "Existing public source agent ID to copy" }),
-      mode: Type.Optional(Type.Union([Type.Literal("live"), Type.Literal("paper")], { description: "Mode for the copying agent: 'live' or 'paper'. Defaults to the source agent's mode." })),
-      alias: Type.Optional(Type.String({ description: "Optional display name for the copied agent" })),
-      chainId: Type.Optional(Type.Number({ description: "Optional chain ID override. Defaults to source agent's chain ID." })),
-      walletId: Type.Optional(Type.Number({ description: "Optional wallet ID to preview against (live mode)" })),
-      walletAddress: Type.Optional(Type.String({ description: "Optional wallet address override used together with walletId preview" })),
-      masterWalletAddress: Type.Optional(Type.String({ description: "Optional master wallet address (live mode). Required for balance checking. If not provided, fetched from wallet record." })),
-    }),
-    async execute(
-      _id: string,
-      params: {
-        sourceAgentId: number;
-        mode?: "live" | "paper";
-        alias?: string;
-          masterWalletAddress?: string;
-        chainId?: number;
-        walletId?: number;
-        walletAddress?: string;
-      },
-    ) {
-      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
-      const auth = getAuthHeader(publicKey, privateKey);
-      const alias = typeof params.alias === "string" && params.alias.trim() ? params.alias.trim() : undefined;
-
-      const result: Record<string, unknown> = {
-        copy: {
-          sourceAgentId: params.sourceAgentId,
-          requestedMode: params.mode ?? null,
-          alias: alias ?? null,
-        },
-      };
-
-      let sourceAgent: any;
-      try {
-        sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId);
-      } catch (e: any) {
-        return textResult({ ...result, error: e.message });
-      }
-
-      const sourceName = typeof sourceAgent?.name === "string" && sourceAgent.name.trim()
-        ? sourceAgent.name.trim()
-        : `Agent ${params.sourceAgentId}`;
-      const sourceSymbol = typeof sourceAgent?.pair === "string" && sourceAgent.pair.trim()
-        ? sourceAgent.pair.trim()
-        : typeof sourceAgent?.symbol === "string" && sourceAgent.symbol.trim()
-          ? sourceAgent.symbol.trim()
-          : undefined;
-      const sourceMarketType: "spot" | "perp" = sourceAgent?.marketType === "perp" ? "perp" : "spot";
-      const sourceChainIdValue = sourceAgent?.chain_id ?? sourceAgent?.chainId;
-      const sourceChainId = sourceChainIdValue == null || Number.isNaN(Number(sourceChainIdValue))
-        ? null
-        : Number(sourceChainIdValue);
-      const sourceBuyLimitValue = sourceAgent?.buy_limit ?? sourceAgent?.buyLimit ?? null;
-      const sourceBuyLimit = sourceBuyLimitValue == null || Number.isNaN(Number(sourceBuyLimitValue))
-        ? null
-        : Number(sourceBuyLimitValue);
-
-      const sourceMode: "live" | "paper" = sourceAgent?.mode === "live" ? "live" : "paper";
-      const effectiveMode: "live" | "paper" = params.mode ?? sourceMode;
-
-      result.sourceAgent = {
-        id: params.sourceAgentId,
-        name: sourceName,
-        owner: sourceAgent?.owner ?? null,
-        mode: sourceMode,
-        pair: sourceSymbol ?? null,
-        marketType: sourceMarketType,
-        chainId: sourceChainId,
-        chainLabel: resolveChainLabel(sourceChainId),
-        currentValueUsd: sourceAgent?.current_value_usd ?? null,
-        initialCapital: sourceAgent?.initialCapital ?? sourceAgent?.initial_capital ?? null,
-        copiedFrom: sourceAgent?.copied_from ?? null,
-      };
-
-      if (!sourceSymbol) {
-        return textResult({
-          ...result,
-          error: `Source agent ${params.sourceAgentId} is missing a trading pair; cannot prepare copy deployment`,
-        });
-      }
-
-      let preparedContext: PreparedAgentCreationContext;
-      try {
-        preparedContext = await prepareAgentCreationContext({
-          name: alias ?? sourceName,
-          mode: effectiveMode,
-          marketType: sourceMarketType,
-          symbol: sourceSymbol,
-          agentId: params.sourceAgentId,
-          npub,
-          publicKey,
-          privateKey,
-        });
-      } catch (e: any) {
-        return textResult({
-          ...result,
-          error: `Could not prepare copy-trade billing preflight: ${e.message}`,
-        });
-      }
-
-      let inferredProtocol: string | undefined;
-      let walletPreview: Record<string, unknown> | undefined;
-      let walletWarning: string | undefined;
-      let resolvedPreviewChainId: number | null = null;
-      let walletDerivedBuyLimit: { initialCapital: number; leverage: number; buyLimit: number } | null = null;
-      
-      // For protocol inference when chainId is explicitly provided:
-      if (params.chainId != null) {
-        try {
-          inferredProtocol = await fetchSettlementProtocolName(sourceMarketType, params.chainId);
-        } catch (e: any) {
-          walletWarning = `Could not infer settlement protocol from instruments: ${e.message}`;
-        }
-      }
-
-      if (effectiveMode === "live" && (params.walletId != null || params.walletAddress)) {
-        try {
-          const wallets = await fetchWalletsForUpdate(auth);
-          const walletRecord = resolveWalletRecord(wallets, {
-            walletId: params.walletId ?? null,
-            walletAddress: params.walletAddress ?? null,
-          });
-          if (!walletRecord) {
-            return textResult({
-              ...result,
-              error: `Wallet preview failed: no wallet matched walletId=${params.walletId ?? "null"} walletAddress=${params.walletAddress ?? "null"}`,
-            });
-          }
-
-          const resolvedWalletAddress = typeof walletRecord.wallet_address === "string"
-            ? walletRecord.wallet_address
-            : params.walletAddress;
-
-          const resolvedMasterWalletAddress = params.masterWalletAddress
-            ? params.masterWalletAddress
-            : typeof walletRecord.master_wallet_address === "string" && walletRecord.master_wallet_address.trim()
-              ? walletRecord.master_wallet_address
-              : null;
-
-          if (!resolvedMasterWalletAddress) {
-            return textResult({
-              ...result,
-              error: `Wallet preview failed: wallet ${resolvedWalletAddress ?? walletRecord.id} does not have a master wallet address configured. For live agents, the master wallet address is required to check balance. Either re-register your wallet with the master address, or pass masterWalletAddress parameter explicitly to prepare_copy_agent.`,
-            });
-          }
-
-          // Chain resolution: explicit override > wallet network > source agent chain
-          if (params.chainId !== undefined) {
-            resolvedPreviewChainId = params.chainId;
-          } else if (resolvedPreviewChainId == null && walletRecord.hyperliquid_network) {
-            if (walletRecord.hyperliquid_network === "mainnet") {
-              resolvedPreviewChainId = 999;
-            } else if (walletRecord.hyperliquid_network === "testnet") {
-              resolvedPreviewChainId = 998;
-            }
-          }
-          if (resolvedPreviewChainId == null && sourceChainId != null) {
-            resolvedPreviewChainId = sourceChainId;
-          }
-
-          if (resolvedPreviewChainId != null && Array.isArray(walletRecord.authorized_agents)) {
-            const conflictingAgent = walletRecord.authorized_agents.find((agent: any) => Number(agent?.chainId) === resolvedPreviewChainId);
-            if (conflictingAgent) {
-              return textResult({
-                ...result,
-                error: `Wallet preview failed: wallet ${resolvedWalletAddress ?? walletRecord.id} is already authorized for agent ${conflictingAgent.id} on chain ${resolvedPreviewChainId}`,
-              });
-            }
-          }
-
-          walletPreview = {
-            walletId: Number(walletRecord.id),
-            walletAddress: resolvedWalletAddress ?? null,
-            masterWalletAddress: resolvedMasterWalletAddress ?? null,
-            walletType: walletRecord.wallet_type ?? null,
-            network: walletRecord.hyperliquid_network ?? null,
-          };
-
-          if (!inferredProtocol) {
-            inferredProtocol = inferLiveProtocol({
-              marketType: sourceMarketType,
-              chainId: resolvedPreviewChainId ?? undefined,
-              walletNetwork: walletRecord.hyperliquid_network ?? null,
-            });
-          }
-
-          if (resolvedMasterWalletAddress && resolvedPreviewChainId != null) {
-            try {
-              walletDerivedBuyLimit = await deriveDefaultLiveBuyLimit(
-                resolvedMasterWalletAddress,
-                resolvedPreviewChainId,
-              );
-            } catch (e: any) {
-              return textResult({
-                ...result,
-                error: `Wallet preview failed: ${e.message}`,
-              });
-            }
-          }
-        } catch (e: any) {
-          return textResult({
-            ...result,
-            error: `Wallet preview failed: ${e.message}`,
-          });
-        }
-      }
-
-      if (walletPreview) {
-        result.wallet = walletPreview;
-      }
-      if (walletWarning) {
-        result.warning = walletWarning;
-      }
-
-      result.billing = preparedContext.prepared.billing;
-      result.billingWallet = preparedContext.prepared.wallet;
-      result.nft = preparedContext.prepared.nft;
-      result.fees = preparedContext.prepared.fees;
-      if (preparedContext.prepared.subscription) {
-        result.subscription = preparedContext.prepared.subscription;
-      }
-      if (preparedContext.prepared.funding) {
-        result.funding = preparedContext.prepared.funding;
-      }
-      if (preparedContext.prepared.gas) {
-        result.gas = preparedContext.prepared.gas;
-      }
-      result.billingBreakdown = buildBillingBreakdown(preparedContext, billingEvmConfig);
-
-      const walletAddress = preparedContext.prepared.wallet.address;
-      const tokenSymbol = preparedContext.prepared.wallet.tokenSymbol ?? "OSWAP";
-      const oswapShortfall = Number(preparedContext.prepared.fees.oswapShortfall ?? "0");
-      const bnbShortfall = Number(preparedContext.prepared.funding?.bnbShortfall ?? "0");
-      const totalBnbNeeded = preparedContext.prepared.funding?.totalBnbNeeded;
-      const bnbForGas = preparedContext.prepared.funding?.bnbForGas;
-
-      if (walletAddress) {
-        result.billingFundingHint =
-          oswapShortfall > 0
-            ? {
-                fundingAsset: "BNB",
-                amountToDeposit: bnbShortfall > 0
-                  ? preparedContext.prepared.funding?.bnbShortfall ?? totalBnbNeeded ?? "0"
-                  : "0",
-                amountNeededTotal: totalBnbNeeded ?? null,
-                reason:
-                  `Your billing wallet does not have enough ${tokenSymbol}. Deposit BNB to ${walletAddress} and OpenClaw will swap part of it into ${tokenSymbol} and use the rest for gas.`,
-                billingWalletAddress: walletAddress,
-              }
-            : bnbShortfall > 0
-              ? {
-                  fundingAsset: "BNB",
-                  amountToDeposit: preparedContext.prepared.funding?.bnbShortfall ?? totalBnbNeeded ?? "0",
-                  amountNeededTotal: totalBnbNeeded ?? null,
-                  reason:
-                    `Your billing wallet already has enough ${tokenSymbol}, but it still needs BNB for gas before OpenClaw can complete the setup.`,
-                  billingWalletAddress: walletAddress,
-                }
-              : {
-                  fundingAsset: tokenSymbol,
-                  amountToDeposit: "0",
-                  amountNeededTotal: totalBnbNeeded ?? null,
-                  reason:
-                    `Your billing wallet already has the required ${tokenSymbol} and BNB balances for this setup.`,
-                  billingWalletAddress: walletAddress,
-                };
-      }
-
-      result.defaults = {
-        alias: alias ?? sourceName,
-        symbol: sourceSymbol,
-        marketType: sourceMarketType,
-        chainId: resolvedPreviewChainId,
-        chainLabel: resolveChainLabel(resolvedPreviewChainId),
-        leverage: walletDerivedBuyLimit?.leverage ?? DEFAULT_LIVE_LEVERAGE,
-        initialCapital: walletDerivedBuyLimit?.initialCapital ?? sourceAgent?.initialCapital ?? sourceAgent?.initial_capital ?? null,
-        buyLimit: walletDerivedBuyLimit?.buyLimit ?? (walletPreview ? sourceBuyLimit : null),
-        buyLimitSource: walletDerivedBuyLimit
-          ? "selected_wallet_balance_x_leverage"
-          : walletPreview
-            ? "source_agent"
-            : "selected_wallet_balance_x_leverage_on_confirm",
-        protocol: inferredProtocol ?? null,
-      };
-      result.chainContext = {
-        requiresUserSelection: resolvedPreviewChainId == null && effectiveMode === "live",
-        reason: effectiveMode === "paper" ? "paper_mode_no_chain_required" : sourceMode === "paper" ? "source_agent_is_paper" : "source_agent_missing_chain_id",
-        suggestedNetworks: ["testnet", "mainnet"],
-      };
-      result.executionPlan = {
-        mode: effectiveMode,
-        billingActions: preparedContext.prepared.executionPlan.actions,
-        approvals: preparedContext.prepared.executionPlan.approvals,
-        depositToVault: preparedContext.prepared.executionPlan.depositToVault,
-        billingWalletAddress: preparedContext.prepared.wallet.address ?? null,
-        billingVaultAddress: preparedContext.prepared.wallet.vaultAddress ?? null,
-        billingTokenAddress: preparedContext.prepared.wallet.tokenAddress ?? null,
-        billingTokenSymbol: preparedContext.prepared.wallet.tokenSymbol ?? null,
-        billingBnbForGas: bnbForGas ?? null,
-        billingTotalBnbNeeded: totalBnbNeeded ?? null,
-        actions: effectiveMode === "live"
-          ? [
-              "Create the copied live agent via POST /api/copy-agent (with delegateToTradingBot + delegateToSettlement for automatic syncing).",
-              "Authorize the selected wallet via POST /api/wallets/authorize.",
-            ]
-          : [
-              "Create the copied paper agent via POST /api/copy-agent (with delegateToTradingBot; no settlement step needed).",
-            ],
-      };
-      result.confirmationRequired = true;
-      result.nextStep = "present_copy_agent_summary_and_wait_for_explicit_confirmation";
-
-      return textResult(result);
-    },
-  });
 
   api.registerTool({
     name: "deploy_agent",
@@ -1728,8 +1353,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount (auto-fetched for live mode)" })),
       mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
       marketType: Type.Optional(Type.String({ description: '"spot" or "perp"', default: "spot" })),
-      strategy: Strategy,
+      strategy: Type.Optional(Strategy),
       strategyDescription: Type.Optional(Type.String({ description: "Human-readable strategy summary" })),
+      sourceAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Strategy is resolved from the source automatically via copiedFromAgentId; do not pass strategy when sourceAgentId is provided." })),
       assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation (used when delegateToTradingBot is true).' })),
       walletAddress: Type.Optional(Type.String({ description: "Agent wallet address (live mode)" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (live mode, for settlement)" })),
@@ -1745,8 +1371,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         initialCapital?: number;
         mode?: string;
         marketType?: string;
-        strategy: Record<string, unknown>;
+        strategy?: Record<string, unknown>;
         strategyDescription?: string;
+        sourceAgentId?: number;
         assetType?: string;
         walletAddress?: string;
         masterWalletAddress?: string;
@@ -1998,6 +1625,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (params.assetType) payload.assetType = params.assetType;
         if (params.strategy) payload.strategy = params.strategy;
         if (params.strategyDescription) payload.strategyDescription = params.strategyDescription;
+        if (params.sourceAgentId != null) payload.copiedFromAgentId = params.sourceAgentId;
         if (params.walletAddress) payload.walletAddress = params.walletAddress;
         if (params.symbol) payload.symbol = params.symbol;
         if (settlementConfig) payload.settlement_config = settlementConfig;
@@ -2118,638 +1746,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
-  api.registerTool({
-    name: "deploy_copy_agent",
-    description: "Create a copy-trading agent from an existing public source agent. Supports all four scenarios: paper→live, live→live, paper→paper, live→paper. For live mode, executes: billing preflight, POST /api/copy-agent (with delegateToTradingBot + delegateToSettlement), wallet authorization, and verification. For paper mode, executes: billing preflight, POST /api/copy-agent (with delegateToTradingBot), and verification. Call this only after a separate preflight has been shown to the user and the user has explicitly confirmed creation.",
-    parameters: Type.Object({
-      sourceAgentId: Type.Number({ description: "Existing public source agent ID to copy" }),
-      mode: Type.Optional(Type.Union([Type.Literal("live"), Type.Literal("paper")], { description: "Mode for the copying agent: 'live' or 'paper'. Defaults to the source agent's mode." })),
-      alias: Type.Optional(Type.String({ description: "Optional display name for the copied agent. Defaults to the source agent name." })),
-      buyLimit: Type.Optional(Type.Number({ description: "Optional max buy amount in USD per copied trade (live mode). Defaults to selected wallet USDC balance multiplied by the default live leverage." })),
-      initialCapital: Type.Optional(Type.Number({ description: "Initial capital override (paper mode). Defaults to source agent's initial capital." })),
-      chainId: Type.Optional(Type.Number({ description: "Optional chain ID override. Defaults to source agent's chain ID. Allows copying to a different chain." })),
-      order: Type.Optional(CopyTradeOrderConfig),
-      // Live-mode parameters
-      walletId: Type.Optional(Type.Number({ description: "Wallet ID for live mode. Required when mode='live' (or source is live and mode not specified)." })),
-      walletAddress: Type.Optional(Type.String({ description: "Optional wallet address override. Usually resolved from walletId." })),
-      masterWalletAddress: Type.Optional(Type.String({ description: "Optional settlement master wallet address override. Defaults to wallet.master_wallet_address or walletAddress." })),
-      protocol: Type.Optional(Type.String({ description: "Optional settlement protocol override (live mode). If omitted, inferred from settlement instruments or the wallet network." })),
-    }),
-    async execute(
-      _id: string,
-      params: {
-        sourceAgentId: number;
-        mode?: "live" | "paper";
-        alias?: string;
-        buyLimit?: number;
-        initialCapital?: number;
-        chainId?: number;
-        order?: {
-          type: string;
-          size: {
-            mode: string;
-            value?: number;
-          };
-        };
-        walletId?: number;
-        walletAddress?: string;
-        masterWalletAddress?: string;
-        protocol?: string;
-      },
-    ) {
-      const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
-      const auth = getAuthHeader(publicKey, privateKey);
-      const alias = typeof params.alias === "string" && params.alias.trim() ? params.alias.trim() : undefined;
-      debugLog("deploy_copy_agent", "entry", {
-        ...params,
-        alias: alias ?? null,
-        usesNostrPrivateKey: true,
-      });
-
-      const result: Record<string, unknown> = {
-        copy: {
-          sourceAgentId: params.sourceAgentId,
-          alias: alias ?? null,
-          requestedMode: params.mode ?? null,
-        },
-        warnings: [] as string[],
-      };
-      const warnings = result.warnings as string[];
-      let preparedContext: PreparedAgentCreationContext;
-      let billingHeaders: EthHeaders | undefined;
-      let billingWallet: Wallet | undefined;
-      let billingTransactions: Record<string, any> | undefined;
-
-      // Step 1: Fetch and validate source agent
-      let sourceAgent: any;
-      try {
-        sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId);
-      } catch (e: any) {
-        result.error = e.message;
-        debugLog("deploy_copy_agent", "result", result);
-        return textResult(result);
-      }
-
-      const sourceName = typeof sourceAgent?.name === "string" && sourceAgent.name.trim()
-        ? sourceAgent.name.trim()
-        : `Agent ${params.sourceAgentId}`;
-      const sourceSymbol = typeof sourceAgent?.pair === "string" && sourceAgent.pair.trim()
-        ? sourceAgent.pair.trim()
-        : typeof sourceAgent?.symbol === "string" && sourceAgent.symbol.trim()
-          ? sourceAgent.symbol.trim()
-          : undefined;
-      if (!sourceSymbol) {
-        result.error = `Source agent ${params.sourceAgentId} is missing a trading pair; cannot deploy copy agent`;
-        debugLog("deploy_copy_agent", "result", result);
-        return textResult(result);
-      }
-
-      const sourceMarketType: "spot" | "perp" = sourceAgent?.marketType === "perp" ? "perp" : "spot";
-      const sourceChainIdValue = sourceAgent?.chain_id ?? sourceAgent?.chainId;
-      const sourceChainId = sourceChainIdValue == null || Number.isNaN(Number(sourceChainIdValue))
-        ? null
-        : Number(sourceChainIdValue);
-      const sourceMode: "live" | "paper" = sourceAgent?.mode === "live" ? "live" : "paper";
-
-      // Effective mode: request override or source agent's mode
-      const effectiveMode: "live" | "paper" = params.mode ?? sourceMode;
-
-      result.sourceAgent = {
-        id: params.sourceAgentId,
-        name: sourceName,
-        owner: sourceAgent?.owner ?? null,
-        mode: sourceMode,
-        pair: sourceSymbol,
-        marketType: sourceMarketType,
-        chainId: sourceChainId,
-        chainLabel: resolveChainLabel(sourceChainId),
-        buyLimit: sourceAgent?.buy_limit ?? sourceAgent?.buyLimit ?? null,
-        currentValueUsd: sourceAgent?.current_value_usd ?? null,
-        copiedFrom: sourceAgent?.copied_from ?? null,
-      };
-
-      // Step 2: Prepare billing context
-      try {
-        preparedContext = await prepareAgentCreationContext({
-          name: alias ?? sourceName,
-          mode: effectiveMode,
-          marketType: sourceMarketType,
-          symbol: sourceSymbol,
-          agentId: params.sourceAgentId,
-          npub,
-          publicKey,
-          privateKey,
-        });
-      } catch (e: any) {
-        result.error = `Could not prepare copy-trade billing preflight: ${e.message}`;
-        debugLog("deploy_copy_agent", "result", result);
-        return textResult(result);
-      }
-
-      // Step 3: Live-mode — wallet and protocol resolution
-      let resolvedWalletId: number | undefined;
-      let resolvedWalletAddress: string | undefined;
-      let resolvedMasterWalletAddress: string | undefined;
-      let resolvedChainId: number | null = params.chainId !== undefined ? params.chainId : sourceChainId;
-      let resolvedProtocol: string | undefined;
-      let resolvedBuyLimit = 0;
-      let settlementConfig: string | undefined;
-
-      if (effectiveMode === "live") {
-        if (params.walletId == null && !params.walletAddress) {
-          result.error = "walletId (or walletAddress) is required for live mode";
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-
-        let wallets: any[];
-        try {
-          wallets = await fetchWalletsForUpdate(auth);
-        } catch (e: any) {
-          result.error = `Failed to load wallets before copy deployment: ${e.message}`;
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-
-        const walletRecord = resolveWalletRecord(wallets, {
-          walletId: params.walletId ?? null,
-          walletAddress: params.walletAddress ?? null,
-        });
-        if (!walletRecord) {
-          result.error = `No wallet matched walletId=${params.walletId ?? "null"}${params.walletAddress ? ` walletAddress=${params.walletAddress}` : ""}`;
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-
-        resolvedWalletId = Number(walletRecord.id);
-        resolvedWalletAddress = typeof params.walletAddress === "string" && params.walletAddress.trim()
-          ? params.walletAddress.trim()
-          : typeof walletRecord.wallet_address === "string" && walletRecord.wallet_address.trim()
-            ? walletRecord.wallet_address.trim()
-            : undefined;
-        if (!resolvedWalletAddress) {
-          result.error = `Wallet ${resolvedWalletId} is missing wallet_address`;
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-
-        resolvedMasterWalletAddress = typeof params.masterWalletAddress === "string" && params.masterWalletAddress.trim()
-          ? params.masterWalletAddress.trim()
-          : typeof walletRecord.master_wallet_address === "string" && walletRecord.master_wallet_address.trim()
-            ? walletRecord.master_wallet_address.trim()
-            : resolvedWalletAddress;
-        const walletNetwork = typeof walletRecord.hyperliquid_network === "string" && walletRecord.hyperliquid_network.trim()
-          ? walletRecord.hyperliquid_network.trim()
-          : null;
-
-        // Resolve chainId for settlement: request override → wallet network → source
-        if (resolvedChainId == null) {
-          if (walletNetwork === "mainnet") {
-            resolvedChainId = 999;
-          } else if (walletNetwork === "testnet") {
-            resolvedChainId = 998;
-          }
-        }
-        if (resolvedChainId == null) {
-          result.error = `Cannot determine chainId for live copy: provide chainId explicitly or use a wallet with a known network`;
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-
-        if (Array.isArray(walletRecord.authorized_agents)) {
-          const conflictingAgent = walletRecord.authorized_agents.find((agent: any) => Number(agent?.chainId) === resolvedChainId);
-          if (conflictingAgent) {
-            result.error = `Wallet ${resolvedWalletAddress} is already authorized for agent ${conflictingAgent.id} on chain ${resolvedChainId}`;
-            debugLog("deploy_copy_agent", "result", result);
-            return textResult(result);
-          }
-        }
-
-        // Resolve protocol
-        resolvedProtocol = typeof params.protocol === "string" && params.protocol.trim()
-          ? params.protocol.trim()
-          : undefined;
-        if (!resolvedProtocol) {
-          try {
-            resolvedProtocol = await fetchSettlementProtocolName(sourceMarketType, resolvedChainId);
-          } catch (e: any) {
-            warnings.push(`Could not infer settlement protocol from instruments: ${e.message}`);
-          }
-        }
-        if (!resolvedProtocol) {
-          resolvedProtocol = inferLiveProtocol({
-            marketType: sourceMarketType,
-            chainId: resolvedChainId,
-            walletNetwork,
-          }) ?? (sourceMarketType === "perp" ? "hyperliquid" : undefined);
-        }
-
-        // Resolve buyLimit
-        let derivedDefaultBuyLimit: { initialCapital: number; leverage: number; buyLimit: number } | null = null;
-        try {
-          derivedDefaultBuyLimit = await deriveDefaultLiveBuyLimit(
-            resolvedMasterWalletAddress!,
-            resolvedChainId,
-          );
-        } catch (e: any) {
-          result.error = e.message;
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-
-        resolvedBuyLimit = hasOwnField(params, "buyLimit")
-          ? Number(params.buyLimit)
-          : (derivedDefaultBuyLimit?.buyLimit ?? 0);
-        if (!Number.isFinite(resolvedBuyLimit) || resolvedBuyLimit < 0) {
-          result.error = "buyLimit must be a finite number greater than or equal to 0";
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-        if (resolvedBuyLimit === 0) {
-          warnings.push("buyLimit resolved to 0 USD. The copied agent may not place meaningful live trades until this is updated.");
-        }
-
-        // Build settlement config
-        const settlementConfigPayload: Record<string, unknown> = {
-          eth_address: resolvedMasterWalletAddress,
-          symbol: sourceSymbol,
-          chain_id: resolvedChainId,
-          buy_limit_usd: resolvedBuyLimit,
-        };
-        if (normalizeAddress(resolvedMasterWalletAddress) !== normalizeAddress(resolvedWalletAddress)) {
-          settlementConfigPayload.agent_address = resolvedWalletAddress;
-        }
-        if (resolvedProtocol) {
-          settlementConfigPayload.protocol = resolvedProtocol;
-        }
-        settlementConfig = JSON.stringify(settlementConfigPayload);
-
-        result.wallet = {
-          walletId: resolvedWalletId,
-          walletAddress: resolvedWalletAddress,
-          masterWalletAddress: resolvedMasterWalletAddress,
-          walletType: walletRecord.wallet_type ?? null,
-          network: walletNetwork,
-        };
-        result.defaults = {
-          symbol: sourceSymbol,
-          marketType: sourceMarketType,
-          chainId: resolvedChainId,
-          chainLabel: resolveChainLabel(resolvedChainId),
-          leverage: derivedDefaultBuyLimit?.leverage ?? DEFAULT_LIVE_LEVERAGE,
-          initialCapital: derivedDefaultBuyLimit?.initialCapital ?? null,
-          buyLimit: resolvedBuyLimit,
-          buyLimitSource: hasOwnField(params, "buyLimit")
-            ? "user_override"
-            : "selected_wallet_balance_x_leverage",
-          protocol: resolvedProtocol ?? null,
-        };
-      } else {
-        // Paper mode defaults
-        result.defaults = {
-          symbol: sourceSymbol,
-          marketType: sourceMarketType,
-          chainId: resolvedChainId,
-          chainLabel: resolveChainLabel(resolvedChainId),
-          initialCapital: params.initialCapital ?? (sourceAgent?.initialCapital ?? sourceAgent?.initial_capital ?? null),
-        };
-      }
-
-      // Step 4: Handle billing
-      const billingRequired = preparedContext.prepared.billing.required;
-      if (!billingRequired) {
-        result.billing = {
-          required: false,
-          bypassed: true,
-          reason: "billing_not_required",
-        };
-      } else {
-        const activeBillingWallet = preparedContext.billingWallet;
-        if (!activeBillingWallet) {
-          result.error = "Billing wallet could not be derived from nostrPrivateKey";
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-        billingWallet = activeBillingWallet;
-        billingTransactions = {
-          swap: { ok: preparedContext.oswapShortfallRaw === 0n, skipped: preparedContext.oswapShortfallRaw === 0n },
-          nftApproval: { ok: !preparedContext.nftApprovalRequired, skipped: !preparedContext.nftApprovalRequired },
-          nftMint: { ok: preparedContext.oswapForNftRaw === 0n, skipped: preparedContext.oswapForNftRaw === 0n },
-          vaultApproval: { ok: !preparedContext.vaultApprovalRequired, skipped: !preparedContext.vaultApprovalRequired },
-          vaultDeposit: { ok: preparedContext.oswapForInitialVaultCreditRaw === 0n, skipped: preparedContext.oswapForInitialVaultCreditRaw === 0n },
-        };
-        result.billing = {
-          required: true,
-          walletAddress: activeBillingWallet.address,
-          preflight: preparedContext.prepared,
-          confirmationRequired: true,
-          transactions: billingTransactions,
-        };
-
-        if (preparedContext.bnbShortfallRaw > 0n) {
-          result.error = `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`;
-          result.billingShortfall = buildBillingBreakdown(preparedContext, billingEvmConfig);
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-
-        const swapPath = [billingEvmConfig.wethAddress, billingEvmConfig.tokenAddress];
-        const routerContract = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, activeBillingWallet) as any;
-        const tokenContract = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, activeBillingWallet) as any;
-        if (!preparedContext.selectedEligibleNft) {
-          result.error = "No active eligible NFT config available";
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-        const nftContract = new Contract(preparedContext.selectedEligibleNft.contractAddress, NFT_ABI, activeBillingWallet) as any;
-        const vaultContract = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, activeBillingWallet) as any;
-
-        const failBilling = (step: string, error: string) => {
-          if (billingTransactions) {
-            billingTransactions[step] = { ok: false, skipped: false, error };
-          }
-          result.error = error;
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        };
-
-        if (preparedContext.oswapShortfallRaw > 0n) {
-          try {
-            const deadline = Math.floor(Date.now() / 1000) + 1_200;
-            const swapTx = await routerContract.swapETHForExactTokens(
-              preparedContext.oswapShortfallRaw,
-              swapPath,
-              activeBillingWallet.address,
-              deadline,
-              { value: preparedContext.bnbForSwapMaxRaw },
-            );
-            const receipt = await swapTx.wait();
-            billingTransactions!.swap = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              oswapAmount: formatAmount(preparedContext.oswapShortfallRaw, billingEvmConfig.tokenDecimals),
-              maxBnbAmount: formatAmount(preparedContext.bnbForSwapMaxRaw, 18, 8),
-            };
-          } catch (e: any) {
-            return failBilling("swap", `BNB to ${billingEvmConfig.tokenSymbol} swap failed: ${e.message}`);
-          }
-        }
-
-        if (preparedContext.nftApprovalRequired) {
-          try {
-            const approveTx = await tokenContract.approve(
-              preparedContext.selectedEligibleNft.contractAddress,
-              preparedContext.oswapForNftRaw,
-            );
-            const receipt = await approveTx.wait();
-            billingTransactions!.nftApproval = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
-            };
-          } catch (e: any) {
-            return failBilling("nftApproval", `NFT approval failed: ${e.message}`);
-          }
-        }
-
-        if (preparedContext.oswapForNftRaw > 0n) {
-          try {
-            const mintTx = await nftContract.stake(preparedContext.oswapForNftRaw);
-            const receipt = await mintTx.wait();
-            billingTransactions!.nftMint = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
-            };
-          } catch (e: any) {
-            return failBilling("nftMint", `NFT mint failed: ${e.message}`);
-          }
-        }
-
-        if (preparedContext.vaultApprovalRequired) {
-          try {
-            const approveTx = await tokenContract.approve(
-              billingEvmConfig.vaultAddress,
-              preparedContext.oswapForInitialVaultCreditRaw,
-            );
-            const receipt = await approveTx.wait();
-            billingTransactions!.vaultApproval = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-            };
-          } catch (e: any) {
-            return failBilling("vaultApproval", `Vault approval failed: ${e.message}`);
-          }
-        }
-
-        if (preparedContext.oswapForInitialVaultCreditRaw > 0n) {
-          try {
-            const depositTx = await vaultContract.deposit(
-              activeBillingWallet.address,
-              preparedContext.oswapForInitialVaultCreditRaw,
-            );
-            const receipt = await depositTx.wait();
-            const indexedBalance = await waitForVaultCredit(
-              activeBillingWallet,
-              preparedContext.existingVaultCreditRaw + preparedContext.oswapForInitialVaultCreditRaw,
-            );
-            billingTransactions!.vaultDeposit = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-              indexedAvailableBalance: formatAmount(indexedBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
-            };
-          } catch (e: any) {
-            return failBilling("vaultDeposit", `Vault deposit failed: ${e.message}`);
-          }
-        }
-
-        billingHeaders = await buildBillingHeaders(activeBillingWallet);
-      }
-
-      // Step 5: POST /api/copy-agent
-      let copiedAgentId: number;
-      let copiedAgentInitialCapital = Number(sourceAgent?.initialCapital ?? sourceAgent?.initial_capital ?? 0);
-      const effectiveName = alias ?? sourceName;
-
-      try {
-        const timestamp = Math.floor(Date.now() / 1000);
-        const signature = buildAgentActionSignature(
-          privateKey,
-          publicKey,
-          params.sourceAgentId,
-          "follow",
-          timestamp,
-        );
-
-        const copyBody: Record<string, unknown> = {
-          id: params.sourceAgentId,
-          mode: effectiveMode,
-          buyLimit: effectiveMode === "live" ? resolvedBuyLimit : undefined,
-          walletAddress: effectiveMode === "live" ? resolvedWalletAddress : undefined,
-          signature,
-          timestamp,
-          delegateToTradingBot: true,
-          delegateToSettlement: effectiveMode === "live",
-        };
-        if (alias) copyBody.alias = alias;
-        if (params.order) copyBody.order = params.order;
-        if (params.chainId !== undefined) copyBody.chainId = params.chainId;
-        if (params.initialCapital !== undefined && effectiveMode === "paper") copyBody.initialCapital = params.initialCapital;
-        if (effectiveMode === "live" && settlementConfig) copyBody.settlement_config = settlementConfig;
-
-        debugLog("deploy_copy_agent", "copy.api.req POST /api/copy-agent", copyBody);
-        const res = await fetch(`${baseUrl}/api/copy-agent`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: auth,
-            ...(billingHeaders ?? {}),
-          },
-          body: JSON.stringify(copyBody),
-        });
-        const body = await parseResponseBody(res);
-        debugLog("deploy_copy_agent", "copy.api.res POST /api/copy-agent", { status: res.status, body });
-
-        result.create = {
-          ok: res.ok && body?.success !== false,
-          status: res.status,
-          body,
-        };
-        if (!res.ok || body?.success === false) {
-          result.error = `copy_agent failed: ${res.status} ${responseErrorMessage(body)}`;
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-
-        copiedAgentId = Number(body?.agentId);
-        if (!Number.isFinite(copiedAgentId) || copiedAgentId <= 0) {
-          result.error = "copy_agent succeeded but did not return a valid agentId";
-          debugLog("deploy_copy_agent", "result", result);
-          return textResult(result);
-        }
-        if (body?.initialCapital != null && Number.isFinite(Number(body.initialCapital))) {
-          copiedAgentInitialCapital = Number(body.initialCapital);
-        }
-        (result.create as Record<string, unknown>).agentId = copiedAgentId;
-        (result.create as Record<string, unknown>).initialCapital = copiedAgentInitialCapital;
-      } catch (e: any) {
-        result.error = e.message;
-        debugLog("deploy_copy_agent", "result", result);
-        return textResult(result);
-      }
-
-      // Step 6: Authorize wallet (live mode only)
-      if (effectiveMode === "live" && resolvedWalletAddress && resolvedWalletId != null) {
-        try {
-          const createdAt = Math.floor(Date.now() / 1000);
-          const walletSignature = buildWalletActionSignature(
-            privateKey,
-            publicKey,
-            resolvedWalletAddress,
-            "authorized",
-            createdAt,
-            copiedAgentId,
-          );
-          const authorizeBody = {
-            agentId: copiedAgentId,
-            npub,
-            walletId: resolvedWalletId,
-            signature: walletSignature,
-            createdAt,
-          };
-          debugLog("deploy_copy_agent", "wallet.api.req POST /api/wallets/authorize", authorizeBody);
-          const res = await fetch(`${baseUrl}/api/wallets/authorize`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: auth,
-            },
-            body: JSON.stringify(authorizeBody),
-          });
-          const body = await parseResponseBody(res);
-          debugLog("deploy_copy_agent", "wallet.api.res POST /api/wallets/authorize", { status: res.status, body });
-          result.authorizeWallet = {
-            ok: res.ok,
-            status: res.status,
-            body,
-          };
-          if (!res.ok) {
-            warnings.push(`Wallet authorization failed after copy creation: ${responseErrorMessage(body)}`);
-          }
-        } catch (e: any) {
-          result.authorizeWallet = { ok: false, error: e.message };
-          warnings.push(`Wallet authorization failed after copy creation: ${e.message}`);
-        }
-      }
-
-      // Step 7: Verify agent
-      try {
-        const agentRes = await fetch(`${baseUrl}/api/agent/${copiedAgentId}`, {
-          headers: { Authorization: auth },
-        });
-        const agentBody = await parseResponseBody(agentRes);
-        debugLog("deploy_copy_agent", "verify.api.res", {
-          agentStatus: agentRes.status,
-          agentBody,
-        });
-        result.verify = {
-          ok: agentRes.ok,
-          agent: agentBody,
-        };
-        if (!agentRes.ok) {
-          warnings.push("Verification after copy deployment did not fully succeed.");
-        }
-      } catch (e: any) {
-        result.verify = { ok: false, error: e.message };
-        warnings.push(`Verification after copy deployment failed: ${e.message}`);
-      }
-
-      // Step 8: Final billing summary
-      if (billingRequired && billingWallet) {
-        try {
-          const [postBalance, subscriptions] = await Promise.all([
-            fetchBillingBalanceSnapshot(billingWallet),
-            fetchBillingSubscriptions(billingWallet),
-          ]);
-          const matchedSubscription = subscriptions.find((subscription: any) => Number(subscription.agent_id) === copiedAgentId);
-          (result.billing as any).result = {
-            nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
-            vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-            updatedVaultCredit: formatAmount(postBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
-            pendingWithdrawalCredit: formatAmount(postBalance.pendingWithdrawalBalanceRaw, billingEvmConfig.tokenDecimals),
-            feeBreakdown: preparedContext.prepared.fees,
-            agentId: copiedAgentId,
-            agentName: effectiveName,
-            creationTimestamp: new Date().toISOString(),
-            nextBillingDateEstimate: matchedSubscription?.next_renewal_at
-              ?? new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
-          };
-        } catch (e: any) {
-          (result.billing as any).result = {
-            nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
-            vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-            feeBreakdown: preparedContext.prepared.fees,
-            agentId: copiedAgentId,
-            agentName: effectiveName,
-            creationTimestamp: new Date().toISOString(),
-            nextBillingDateEstimate: new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
-            warning: e.message,
-          };
-        }
-      }
-
-      result.warnings = Array.from(new Set(warnings));
-      debugLog("deploy_copy_agent", "result", result);
-      return textResult(result);
-    },
-  });
 
   api.registerTool({
     name: "search_public_agents",
