@@ -835,7 +835,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         ((hasOwnField(params, "mode") && targetMode === "paper") ||
           (targetMode === "paper" &&
             (hasOwnField(params, "marketType") ||
-              hasOwnField(params, "chainId") ||
               hasOwnField(params, "protocol"))));
 
       let settlementConfigPayload: Record<string, unknown> | undefined;
