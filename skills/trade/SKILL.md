@@ -172,6 +172,8 @@ Please review your agent before funding your wallet.
 - Current BNB shortfall: *~{funding.bnbShortfall} BNB*
 - Explain the shortfall in plain language. Example: "The ~0.018 BNB shortfall is made up of ~0.015 BNB to swap into OSWAP plus ~0.003 BNB for gas."
 
+**IMPORTANT:** Once the fee breakdown and shortfall are presented, immediately show the billing wallet address in the "Where to deposit" section. **Always display the full billing wallet address (never abbreviated) whenever there are upfront costs for the user to pay.** This ensures the user knows exactly where to send funds.
+
 ## Where to deposit
 
 - *Deposit network:* {wallet.networkLabel}
@@ -180,6 +182,8 @@ Please review your agent before funding your wallet.
 - If deposit network is *BNB Chain Testnet*, add: `Need testnet BNB? Use the faucet: https://www.bnbchain.org/en/testnet-faucet`
 
 ## Fund your wallet
+
+**MANDATORY - Always display billing wallet address:** When presenting any costs or funding instructions, the billing wallet address must be clearly shown in full (never abbreviated with `0x...`). This is critical for user safety and preventing funds from going to the wrong address.
 
 You need:
 
