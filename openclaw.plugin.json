@@ -24,6 +24,10 @@
         "type": "string",
         "default": "https://settlement-agent.decom.dev"
       },
+      "enableAmmSpot": {
+        "type": "boolean",
+        "default": false
+      },
       "billingEnvironment": {
         "type": "string",
         "enum": ["test", "prod"],

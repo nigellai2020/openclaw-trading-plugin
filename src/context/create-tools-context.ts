@@ -48,6 +48,7 @@ export function createToolsContext(api: any) {
   const tradingBotUrl: string = pluginConfig.tradingBotUrl ?? DEFAULT_BOT_URL;
   const walletAgentUrl: string = pluginConfig.walletAgentUrl ?? DEFAULT_WALLET_AGENT_URL;
   const settlementEngineUrl: string = pluginConfig.settlementEngineUrl ?? DEFAULT_SETTLEMENT_ENGINE_URL;
+  const enableAmmSpot: boolean = pluginConfig.enableAmmSpot === true;
   const billingEvmConfig = buildBillingEvmConfig(pluginConfig);
   const billingProvider = new JsonRpcProvider(billingEvmConfig.rpcUrl);
 
@@ -119,6 +120,12 @@ export function createToolsContext(api: any) {
 
   function resolveMarketType(_mode: string, marketType?: string): "spot" | "perp" {
     return marketType === "perp" ? "perp" : "spot";
+  }
+
+  function ensureAmmSpotEnabled(mode: string, marketType?: string): void {
+    if (mode === "live" && marketType === "spot" && !enableAmmSpot) {
+      throw new Error("AMM Spot is disabled by plugin configuration. This stage only supports Hyperliquid Perps.");
+    }
   }
 
   function resolveLiveChainId(chainId?: number): 998 | 999 {
@@ -995,10 +1002,12 @@ export function createToolsContext(api: any) {
     tradingBotUrl,
     walletAgentUrl,
     settlementEngineUrl,
+    enableAmmSpot,
     billingEvmConfig,
     debugLog,
     responseErrorMessage,
     resolveMarketType,
+    ensureAmmSpotEnabled,
     resolveLiveChainId,
     hasOwnField,
     normalizeAddress,

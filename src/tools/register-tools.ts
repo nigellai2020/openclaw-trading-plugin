@@ -2,7 +2,6 @@ import { Type } from "@sinclair/typebox";
 import { Crypto, Keys, Nip19, Signer } from "@scom/scom-signer";
 import { Contract, Wallet } from "ethers";
 import {
-  DEFAULT_LIVE_LEVERAGE,
   ERC20_ABI,
   getEvmChainConfig,
   NFT_ABI,
@@ -20,7 +19,7 @@ import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
 import { sanitizeBacktestResultResponse, WEB_URL } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
-import { deriveDefaultLiveBuyLimit, fetchEvmWalletBalances, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
+import { fetchEvmWalletBalances, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
 import { fetchSupportedPairsFromApi } from "../utils/supported-pairs.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
@@ -177,10 +176,12 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     tradingBotUrl,
     walletAgentUrl,
     settlementEngineUrl,
+    enableAmmSpot,
     billingEvmConfig,
     debugLog,
     responseErrorMessage,
     resolveMarketType,
+    ensureAmmSpotEnabled,
     resolveLiveChainId,
     hasOwnField,
     normalizeAddress,
@@ -344,6 +345,15 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       params: { assetType?: string; protocol?: string },
     ) {
       let results = await fetchSupportedPairsFromApi(baseUrl);
+
+      if (!enableAmmSpot) {
+        results = results
+          .map((p) => ({
+            ...p,
+            venues: p.venues.filter((v) => v.protocol !== "amm"),
+          }))
+          .filter((p) => p.asset_type !== "crypto" || p.venues.length > 0);
+      }
 
       if (params.assetType) {
         results = results.filter((p) => p.asset_type === params.assetType);
@@ -569,7 +579,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "update_agent",
-    description: "Update a trading agent via PUT /api/agent. The server handles all downstream trading-bot and settlement syncing internally. Only explicitly provided fields are updated.",
+    description: "Update a trading agent via PUT /api/agent. The server handles all downstream trading-bot and settlement syncing internally. Conservative mode: only explicitly provided fields are updated; when companion fields are missing for a safe live update, ask the user for them before retrying.",
     parameters: Type.Object({
       agentId: Type.Number({ description: "Agent ID to update" }),
       name: Type.Optional(Type.String({ description: "Updated agent name" })),
@@ -677,6 +687,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       ) {
         return textResult({ error: 'simulationConfig.asset_type must be "crypto" or "stocks"' });
       }
+      if (hasOwnField(params, "copiedFromAgentId") && hasOwnField(params, "isPrivate")) {
+        return textResult({
+          error: "Do not send isPrivate together with copiedFromAgentId. Copied agents are always private; ask the user only for the source agent ID.",
+        });
+      }
 
       debugLog("update_agent", "entry", { requestedFields, ...params });
 
@@ -728,6 +743,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         : params.marketType === "spot"
           ? "spot"
           : currentMarketType;
+      try {
+        ensureAmmSpotEnabled(targetMode, targetMarketType);
+      } catch (e: any) {
+        return textResult({ ...result, error: e.message });
+      }
 
       const currentWalletRecord = resolveWalletRecord(wallets, {
         walletId: currentSettings?.walletId,
@@ -1001,7 +1021,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (hasOwnField(params, "buyLimit")) body.buyLimit = params.buyLimit;
         if (hasOwnField(params, "protocol")) body.protocol = params.protocol;
         if (settlementConfigPayload) body.settlement_config = settlementConfigPayload;
-        if (hasOwnField(params, "isPrivate")) body.isPrivate = params.isPrivate;
+        if (!hasOwnField(params, "copiedFromAgentId") && hasOwnField(params, "isPrivate")) {
+          body.isPrivate = params.isPrivate;
+        }
         if (hasOwnField(params, "copiedFromAgentId")) body.copiedFromAgentId = params.copiedFromAgentId;
 
         debugLog("update_agent", "trading-data.req", { url: `${baseUrl}/api/agent`, body, hasBillingHeaders: Object.keys(billingHeaders).length > 0 });
@@ -1272,9 +1294,16 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       },
     ) {
       const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
+      const effectiveMode = params.mode ?? "paper";
+      const effectiveMarketType = params.marketType ?? (params.sourceAgentId != null ? undefined : "spot");
+      try {
+        ensureAmmSpotEnabled(effectiveMode, effectiveMarketType);
+      } catch (e: any) {
+        return textResult({ error: e.message });
+      }
       debugLog("prepare_agent_creation", "entry", {
         name: params.name,
-        mode: params.mode ?? "paper",
+        mode: effectiveMode,
         marketType: params.marketType ?? "spot",
         symbol: params.symbol,
         sourceAgentId: params.sourceAgentId,
@@ -1297,6 +1326,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         }
         const sourceMarketType: "spot" | "perp" = sourceAgent?.marketType === "perp" ? "perp" : "spot";
         const effectiveMode: string = params.mode ?? sourceAgent?.mode ?? "paper";
+        try {
+          ensureAmmSpotEnabled(effectiveMode, sourceMarketType);
+        } catch (e: any) {
+          return textResult({ error: e.message });
+        }
         try {
           const prepared = await prepareAgentCreationContext({
             name: params.name,
@@ -1348,10 +1382,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. The server handles all downstream trading-bot and settlement syncing internally on POST /api/agent. Call this only after a separate preflight has been shown to the user and the user has explicitly confirmed creation. Keep optional fields omitted unless explicitly provided by the user.",
+    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. The server handles all downstream trading-bot and settlement syncing internally on POST /api/agent. Conservative mode: only pass fields explicitly provided by the user, never invent defaults. If required values are missing, ask the user before retrying.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
-      initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount (auto-fetched for live mode)" })),
+      initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount" })),
       mode: Type.Optional(Type.String({ description: '"paper" or "live". Optional; omit unless specified by the user.' })),
       marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when sourceAgentId is provided, omit unless user explicitly requests override.' })),
       strategy: Type.Optional(Strategy),
@@ -1363,6 +1397,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
       chainId: Type.Optional(Type.Number({ description: "Network chain ID for both paper and live modes (e.g. Hyperliquid: 998/999, EVM: 1/56). Optional for copy agents unless user explicitly requests override." })),
       leverage: Type.Optional(Type.Number({ description: "Leverage multiplier. Optional for copy agents unless user explicitly requests override." })),
+      buyLimit: Type.Optional(Type.Number({ description: "Live-trading buy limit in USD. Only include when the user explicitly requests it." })),
       isPrivate: Type.Optional(Type.Boolean({ description: 'When true, the agent is private and excluded from the public leaderboard. Defaults to false (public). Once an agent is public it cannot be made private again. Copy agents are always private.' })),
     }),
     async execute(
@@ -1381,35 +1416,36 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         symbol?: string;
         chainId?: number;
         leverage?: number;
+        buyLimit?: number;
         isPrivate?: boolean;
       },
     ) {
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
       const isCopyAgent = params.sourceAgentId != null;
-      const mode = params.mode ?? "paper";
+      if (params.mode == null) {
+        return textResult({ error: 'mode is required. Ask the user to choose "paper" or "live".' });
+      }
+      if (params.mode !== "paper" && params.mode !== "live") {
+        return textResult({ error: 'mode must be "paper" or "live"' });
+      }
+      const mode = params.mode;
       const isLive = mode === "live";
-      let sourceAgent: any;
-      let effectiveSymbol = params.symbol;
       let marketType: "spot" | "perp" | undefined;
       try {
-        if (isCopyAgent && (params.symbol == null || params.marketType == null)) {
-          sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId!);
-          if (!effectiveSymbol) {
-            effectiveSymbol = (typeof sourceAgent?.pair === "string" && sourceAgent.pair.trim())
-              ? sourceAgent.pair.trim()
-              : (typeof sourceAgent?.symbol === "string" && sourceAgent.symbol.trim())
-                ? sourceAgent.symbol.trim()
-                : undefined;
-          }
+        if (!isCopyAgent && params.marketType == null) {
+          return textResult({ error: 'marketType is required for non-copy agents. Ask the user for "spot" or "perp".' });
         }
-        if (params.marketType != null) {
-          marketType = resolveMarketType(mode, params.marketType);
-        } else if (!isCopyAgent) {
-          marketType = resolveMarketType(mode, params.marketType);
-        } else if (sourceAgent?.marketType === "spot" || sourceAgent?.marketType === "perp") {
-          marketType = sourceAgent.marketType;
+        ensureAmmSpotEnabled(mode, params.marketType);
+        if (isCopyAgent && params.marketType == null) {
+          const sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId!);
+          marketType = sourceAgent?.marketType === "perp" ? "perp" : "spot";
+          ensureAmmSpotEnabled(mode, marketType);
         }
+        if (!isCopyAgent && !params.symbol) {
+          return textResult({ error: "symbol is required for non-copy agents. Ask the user for the trading pair (for example, ETH/USDC)." });
+        }
+        if (params.marketType != null) marketType = resolveMarketType(mode, params.marketType);
         if (isLive) {
           if (!params.walletAddress) {
             return textResult({ error: "walletAddress is required for live mode" });
@@ -1428,33 +1464,14 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       let billingWallet: Wallet | undefined;
       let billingTransactions: Record<string, any> | undefined;
 
-      // Auto-fetch initial capital for live mode
       let initialCapital = params.initialCapital;
-      if (isLive && initialCapital == null && params.masterWalletAddress) {
-        try {
-          const derived = await deriveDefaultLiveBuyLimit(
-            params.masterWalletAddress,
-            params.chainId ?? 998,
-          );
-          if (derived) {
-            initialCapital = derived.initialCapital;
-            debugLog("deploy_agent", "auto-fetched balance", { initialCapital, chainId: params.chainId });
-          }
-        } catch (e: any) {
-          return textResult({ error: e.message });
-        }
-      }
-      if (initialCapital == null && !isCopyAgent) {
-        return textResult({ error: "initialCapital is required" });
+      if (initialCapital == null && !isCopyAgent && !isLive) {
+        return textResult({ error: "initialCapital is required for paper mode" });
       }
 
-      // For direct live agents, default leverage to 3x. For copy agents, only use explicit leverage override.
-      const leverage = isLive
-        ? (isCopyAgent ? params.leverage : (params.leverage ?? DEFAULT_LIVE_LEVERAGE))
-        : params.leverage;
+      const leverage = params.leverage;
 
-      // Auto-compute buyLimit and settlement_config for live
-      const buyLimit = isLive && leverage != null && initialCapital != null ? initialCapital * leverage : undefined;
+      const buyLimit = params.buyLimit;
       const settlementConfig = isLive && params.masterWalletAddress && params.walletAddress
         ? { eth_address: params.masterWalletAddress, agent_address: params.walletAddress }
         : undefined;
@@ -1465,7 +1482,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           name: params.name,
           mode,
           marketType,
-          symbol: effectiveSymbol,
+          symbol: params.symbol,
           npub,
           publicKey,
           privateKey,
@@ -1651,7 +1668,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (params.walletAddress) payload.walletAddress = params.walletAddress;
         if (params.symbol) payload.symbol = params.symbol;
         if (settlementConfig) payload.settlement_config = settlementConfig;
-        if (hasOwnField(params, "isPrivate")) payload.isPrivate = params.isPrivate;
+        if (!isCopyAgent && hasOwnField(params, "isPrivate")) payload.isPrivate = params.isPrivate;
 
         debugLog("deploy_agent", "create.api.req POST /api/agent", payload);
         const res = await fetch(`${baseUrl}/api/agent`, {
