@@ -7,6 +7,7 @@ import {
   NFT_ABI,
   ROUTER_ABI,
   VAULT_ABI,
+  validateChainIdForMarketType,
 } from "../constants/trading.js";
 import {
   createToolsContext,
@@ -749,6 +750,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         return textResult({ ...result, error: e.message });
       }
 
+      if (params.chainId != null) {
+        const chainErr = validateChainIdForMarketType(params.chainId, targetMarketType);
+        if (chainErr) return textResult({ ...result, error: chainErr });
+      }
+
       const currentWalletRecord = resolveWalletRecord(wallets, {
         walletId: currentSettings?.walletId,
         walletAddress: currentSettings?.walletAddress,
@@ -1446,6 +1452,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           return textResult({ error: "symbol is required for non-copy agents. Ask the user for the trading pair (for example, ETH/USDC)." });
         }
         if (params.marketType != null) marketType = resolveMarketType(mode, params.marketType);
+        if (params.chainId != null && marketType != null) {
+          const chainErr = validateChainIdForMarketType(params.chainId, marketType);
+          if (chainErr) return textResult({ error: chainErr });
+        }
         if (isLive) {
           if (!params.walletAddress) {
             return textResult({ error: "walletAddress is required for live mode" });
