@@ -986,7 +986,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           timestamp: signedAt,
           delegateToTradingBot: true,
           delegateToSettlement: true,
-          prevMode: currentMode,
         };
         if (hasOwnField(params, "name")) body.name = params.name;
         if (hasOwnField(params, "description")) body.description = params.description;
