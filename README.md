@@ -42,6 +42,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | `get_token_prices` | Get current live token prices for all tracked tokens or a normalized symbol list |
 | `get_ohlc`         | Get OHLC candle data for a symbol |
 | `get_agent_trades` | Get past trades / trade history for a single agent with optional `range` (`1d`, `7d`, etc.) or explicit timestamps |
+| `get_open_positions` | Get the current open positions for a single agent |
 
 `get_token_prices` accepts an optional `symbols` array. OpenClaw should normalize user input before calling it and pass uppercase base-token symbols like `ETH` or `BTC`. If malformed symbols are provided, the tool returns a validation error so OpenClaw can retry.
 

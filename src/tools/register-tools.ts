@@ -436,6 +436,35 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
+  api.registerTool({
+    name: "get_open_positions",
+    description: "Get the current open positions for a single agent. This calls GET /api/positions/:traderId and returns open positions only.",
+    parameters: Type.Object({
+      agentId: Type.Number({ description: "Agent ID" }),
+      page: Type.Optional(Type.Number({ description: "Page number" })),
+      pageSize: Type.Optional(Type.Number({ description: "Results per page" })),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        agentId: number;
+        page?: number;
+        pageSize?: number;
+      },
+    ) {
+      const qs = new URLSearchParams();
+      if (params.page != null) qs.set("page", String(params.page));
+      if (params.pageSize != null) qs.set("pageSize", String(params.pageSize));
+
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const url = `${baseUrl}/api/positions/${params.agentId}${qs.toString() ? `?${qs}` : ""}`;
+      const res = await fetch(url, { headers: { Authorization: auth } });
+      if (!res.ok) throw new Error(`get_open_positions failed: ${res.status}`);
+      return textResult(await res.json());
+    },
+  });
+
   // ── Identity tools ─────────────────────────────────────
 
   api.registerTool({
