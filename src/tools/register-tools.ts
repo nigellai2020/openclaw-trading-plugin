@@ -569,7 +569,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "update_agent",
-    description: "Update a trading agent via PUT /api/agent with delegateToTradingBot and delegateToSettlement flags so the server handles all downstream syncing. Only explicitly provided fields are updated.",
+    description: "Update a trading agent via PUT /api/agent. The server handles all downstream trading-bot and settlement syncing internally. Only explicitly provided fields are updated.",
     parameters: Type.Object({
       agentId: Type.Number({ description: "Agent ID to update" }),
       name: Type.Optional(Type.String({ description: "Updated agent name" })),
@@ -984,8 +984,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           id: params.agentId,
           signature: logSignature,
           timestamp: signedAt,
-          delegateToTradingBot: true,
-          delegateToSettlement: true,
         };
         if (hasOwnField(params, "name")) body.name = params.name;
         if (hasOwnField(params, "description")) body.description = params.description;
@@ -1351,7 +1349,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Uses delegateToTradingBot and delegateToSettlement flags on POST /api/agent so the server handles all downstream syncing internally. Call this only after a separate preflight has been shown to the user and the user has explicitly confirmed creation. Keep optional fields omitted unless explicitly provided by the user.",
+    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. The server handles all downstream trading-bot and settlement syncing internally on POST /api/agent. Call this only after a separate preflight has been shown to the user and the user has explicitly confirmed creation. Keep optional fields omitted unless explicitly provided by the user.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount (auto-fetched for live mode)" })),
@@ -1360,7 +1358,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       strategy: Type.Optional(Strategy),
       strategyDescription: Type.Optional(Type.String({ description: "Human-readable strategy summary" })),
       sourceAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
-      assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation (used when delegateToTradingBot is true).' })),
+      assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation.' })),
       walletAddress: Type.Optional(Type.String({ description: "Agent wallet address (live mode)" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (live mode, for settlement)" })),
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
@@ -1654,8 +1652,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (params.walletAddress) payload.walletAddress = params.walletAddress;
         if (params.symbol) payload.symbol = params.symbol;
         if (settlementConfig) payload.settlement_config = settlementConfig;
-        payload.delegateToTradingBot = true;
-        if (isLive) payload.delegateToSettlement = true;
         if (hasOwnField(params, "isPrivate")) payload.isPrivate = params.isPrivate;
 
         debugLog("deploy_agent", "create.api.req POST /api/agent", payload);
@@ -1856,7 +1852,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "delete_agent",
-    description: "Delete a trading agent by ID. Delegates removal to trading-bot and settlement engine via DELETE /api/agent/:id with delegateToTradingBot and delegateToSettlement flags.",
+    description: "Delete a trading agent by ID. The server delegates removal to trading-bot and settlement engine internally via DELETE /api/agent/:id.",
     parameters: Type.Object({
       agentId: Type.Number({ description: "Agent ID to delete" }),
     }),
@@ -1874,8 +1870,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         headers: { Authorization: auth },
       });
       if (!agentRes.ok) return textResult({ error: `Agent ${params.agentId} not found: ${agentRes.status}` });
-      const agentData = await agentRes.json();
-      const isLive = agentData?.data?.mode === "live";
+      await agentRes.json();
 
       // Step 1: Delete from trading-data (delegates to trading-bot and settlement engine)
       try {
@@ -1891,7 +1886,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             Authorization: auth,
             ...billingHeaders,
           },
-          body: JSON.stringify({ signature, timestamp: signedAt, delegateToTradingBot: true, delegateToSettlement: true }),
+          body: JSON.stringify({ signature, timestamp: signedAt }),
         });
         debugLog("delete_agent", "trading-data.res", { status: res.status });
         result.tradingData = { ok: res.ok };

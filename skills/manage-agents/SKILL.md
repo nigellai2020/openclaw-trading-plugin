@@ -25,5 +25,5 @@ If the user asks about billing subscriptions, renewal status, or next billing da
 ## Delete an agent
 1. If the user hasn't specified an agent ID, call `list_my_agents` first and ask which one to delete.
 2. Confirm with the user before deleting — show the agent name and ID.
-3. Call `delete_agent` with the `agentId`. The server handles all delegation (trading-bot and settlement) internally via `delegateToTradingBot` and `delegateToSettlement` flags.
+3. Call `delete_agent` with the `agentId`. The server handles all delegation (trading-bot and settlement) internally.
 4. Report `tradingData.ok`. If it failed, say deletion may be incomplete.
