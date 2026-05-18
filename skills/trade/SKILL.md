@@ -9,6 +9,12 @@ Follow these steps to create a paper or live trading agent. This skill covers bo
 
 **Copy-agent path:** If the user wants to copy, follow, or duplicate an existing agent, that is handled by this same skill. When in copy mode, Steps 1–4 are the same, Step 5 (Build strategy) is **skipped** (the strategy is inherited from the source agent), and the `sourceAgentId` is passed to `prepare_agent_creation` and `deploy_agent` instead of a strategy object.
 
+**No-fabrication rule (strict):** Do not invent or infer optional values the user did not provide. Keep optional fields omitted unless one of these is true:
+- the user explicitly asked to set/override that field, or
+- the workflow/tooling explicitly derives that field from the selected source agent.
+
+For copy-agent requests, default to passing only `name`, `mode` (if user specified), and `sourceAgentId`. Do not fabricate `chainId`, `marketType`, `symbol`, `leverage`, or `initialCapital`.
+
 ## Step 1 — Ask trading mode and resolve market/network
 Ask the user: **paper** or **live** mode?
 - Paper: simulated trading, no real funds
@@ -25,6 +31,7 @@ Then resolve the missing choices before continuing:
     - mainnet → `chainId: 999`
   - For EVM (e.g. Ethereum, BSC, Arbitrum, Base): ask or infer the chain ID.
 - Do not ask again if the user already specified the asset type, market type, or network.
+- Copy-agent exception: when `sourceAgentId` is provided and the user did not request overrides, inherit market/network fields from the source agent and keep those optional fields omitted in tool calls.
 
 ## Step 2 — Initialize session
 Call `init_trading_session` with the chosen `mode`.
@@ -101,7 +108,7 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 - Call `prepare_agent_creation` with:
   - Paper original: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
   - Live original: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
-  - Copy agent: `name`, `mode`, and `sourceAgentId` — do **not** pass `marketType` or `symbol` (they are resolved from the source agent)
+  - Copy agent: `name`, `mode`, and `sourceAgentId` — do **not** pass `marketType`, `symbol`, `chainId`, `leverage`, or `initialCapital` unless the user explicitly requests an override
 - If `prepare_agent_creation.billing.required = false`, say no upfront billing setup is required and skip to Step 8.
 - If `prepare_agent_creation.billing.required = true`, present the checkout page described below.
 - If `prepare_agent_creation` reports an `error`, STOP and explain it.
@@ -230,14 +237,19 @@ Call `deploy_agent` with:
 - `chainId`: **required when `assetType` is `"crypto"`** — pass for both paper and live modes
 - `symbol`: always pass when known
 - **Original agent:** also pass `strategy`; if perp: `leverage` (same as `strategy.risk_manager.leverage`)
-- **Copy agent:** pass `sourceAgentId` instead of `strategy` — do **not** pass a `strategy` object
+- **Copy agent:** pass `sourceAgentId` instead of `strategy` — do **not** pass a `strategy` object. Keep other optional fields omitted unless the user explicitly asked to override them.
 - Paper: `initialCapital`
 - Live: `walletAddress`, `masterWalletAddress`. For Hyperliquid (chainId 998/999), `initialCapital` is auto-fetched from the wallet balance — do NOT pass it. For other networks, pass `initialCapital` explicitly.
+
+Copy-agent payload minimums:
+- Preferred minimal payload: `name`, `sourceAgentId`, optional `mode` if user specified.
+- Only include `marketType`, `symbol`, `chainId`, `leverage`, or `initialCapital` when the user explicitly asked to override source-agent defaults.
 
 Important:
 - Do **not** pass `simulationConfig` — it is not in the API spec.
 - Do **not** pass `walletId` or `protocol` — not in the API spec.
-- Do **not** omit `chainId` for crypto agents, even in paper mode.
+- Do **not** omit `chainId` for crypto original-agent flows, even in paper mode.
+- For copy-agent flows, omit `chainId` unless the user explicitly asked for an override.
 
 Handle the response:
 - **create.ok = false**: Report error and STOP.

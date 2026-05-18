@@ -1257,13 +1257,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "prepare_agent_creation",
-    description: "Read-only preflight for agent creation (direct or copy). Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction. OpenClaw must present this result to the user and get explicit confirmation before calling deploy_agent.",
+    description: "Read-only preflight for agent creation (direct or copy). Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction. OpenClaw must present this result to the user and get explicit confirmation before calling deploy_agent. Keep optional fields omitted unless explicitly provided by the user.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
-      mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
-      marketType: Type.Optional(Type.String({ description: '"spot" or "perp"', default: "spot" })),
+      mode: Type.Optional(Type.String({ description: '"paper" or "live". Optional; omit unless specified by the user.' })),
+      marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when sourceAgentId is provided, omit unless the user explicitly asks to override.' })),
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
-      sourceAgentId: Type.Optional(Type.Number({ description: "When copying an existing public agent, pass the source agent ID. symbol and marketType are resolved from the source; do not pass them separately." })),
+      sourceAgentId: Type.Optional(Type.Number({ description: "When copying an existing public agent, pass the source agent ID. symbol and marketType are resolved from the source by default; do not fabricate or pass optional overrides unless explicitly requested." })),
     }),
     async execute(
       _id: string,
@@ -1352,21 +1352,21 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Uses delegateToTradingBot and delegateToSettlement flags on POST /api/agent so the server handles all downstream syncing internally. Call this only after a separate preflight has been shown to the user and the user has explicitly confirmed creation.",
+    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. Uses delegateToTradingBot and delegateToSettlement flags on POST /api/agent so the server handles all downstream syncing internally. Call this only after a separate preflight has been shown to the user and the user has explicitly confirmed creation. Keep optional fields omitted unless explicitly provided by the user.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount (auto-fetched for live mode)" })),
-      mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
-      marketType: Type.Optional(Type.String({ description: '"spot" or "perp"', default: "spot" })),
+      mode: Type.Optional(Type.String({ description: '"paper" or "live". Optional; omit unless specified by the user.' })),
+      marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when sourceAgentId is provided, omit unless user explicitly requests override.' })),
       strategy: Type.Optional(Strategy),
       strategyDescription: Type.Optional(Type.String({ description: "Human-readable strategy summary" })),
-      sourceAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Strategy is resolved from the source automatically via copiedFromAgentId; do not pass strategy when sourceAgentId is provided." })),
+      sourceAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
       assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation (used when delegateToTradingBot is true).' })),
       walletAddress: Type.Optional(Type.String({ description: "Agent wallet address (live mode)" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (live mode, for settlement)" })),
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
-      chainId: Type.Optional(Type.Number({ description: "Network chain ID for both paper and live modes (e.g. Hyperliquid: 998/999, EVM: 1/56)." })),
-      leverage: Type.Optional(Type.Number({ description: "Leverage multiplier" })),
+      chainId: Type.Optional(Type.Number({ description: "Network chain ID for both paper and live modes (e.g. Hyperliquid: 998/999, EVM: 1/56). Optional for copy agents unless user explicitly requests override." })),
+      leverage: Type.Optional(Type.Number({ description: "Leverage multiplier. Optional for copy agents unless user explicitly requests override." })),
       isPrivate: Type.Optional(Type.Boolean({ description: 'When true, the agent is private and excluded from the public leaderboard. Defaults to false (public). Once an agent is public it cannot be made private again. Copy agents are always private.' })),
     }),
     async execute(
@@ -1390,11 +1390,30 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     ) {
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
+      const isCopyAgent = params.sourceAgentId != null;
       const mode = params.mode ?? "paper";
       const isLive = mode === "live";
-      let marketType: "spot" | "perp" = "spot";
+      let sourceAgent: any;
+      let effectiveSymbol = params.symbol;
+      let marketType: "spot" | "perp" | undefined;
       try {
-        marketType = resolveMarketType(mode, params.marketType);
+        if (isCopyAgent && (params.symbol == null || params.marketType == null)) {
+          sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId!);
+          if (!effectiveSymbol) {
+            effectiveSymbol = (typeof sourceAgent?.pair === "string" && sourceAgent.pair.trim())
+              ? sourceAgent.pair.trim()
+              : (typeof sourceAgent?.symbol === "string" && sourceAgent.symbol.trim())
+                ? sourceAgent.symbol.trim()
+                : undefined;
+          }
+        }
+        if (params.marketType != null) {
+          marketType = resolveMarketType(mode, params.marketType);
+        } else if (!isCopyAgent) {
+          marketType = resolveMarketType(mode, params.marketType);
+        } else if (sourceAgent?.marketType === "spot" || sourceAgent?.marketType === "perp") {
+          marketType = sourceAgent.marketType;
+        }
         if (isLive) {
           if (!params.walletAddress) {
             return textResult({ error: "walletAddress is required for live mode" });
@@ -1429,15 +1448,17 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           return textResult({ error: e.message });
         }
       }
-      if (initialCapital == null) {
+      if (initialCapital == null && !isCopyAgent) {
         return textResult({ error: "initialCapital is required" });
       }
 
-      // Default leverage to 3x for live mode
-      const leverage = isLive ? (params.leverage ?? DEFAULT_LIVE_LEVERAGE) : params.leverage;
+      // For direct live agents, default leverage to 3x. For copy agents, only use explicit leverage override.
+      const leverage = isLive
+        ? (isCopyAgent ? params.leverage : (params.leverage ?? DEFAULT_LIVE_LEVERAGE))
+        : params.leverage;
 
       // Auto-compute buyLimit and settlement_config for live
-      const buyLimit = isLive && leverage ? initialCapital * leverage : undefined;
+      const buyLimit = isLive && leverage != null && initialCapital != null ? initialCapital * leverage : undefined;
       const settlementConfig = isLive && params.masterWalletAddress && params.walletAddress
         ? { eth_address: params.masterWalletAddress, agent_address: params.walletAddress }
         : undefined;
@@ -1448,7 +1469,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           name: params.name,
           mode,
           marketType,
-          symbol: params.symbol,
+          symbol: effectiveSymbol,
           npub,
           publicKey,
           privateKey,
@@ -1619,11 +1640,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       try {
         const payload: Record<string, unknown> = {
           name: params.name,
-          initialCapital,
           mode,
-          marketType,
           owner: npub,
         };
+        if (initialCapital != null) payload.initialCapital = initialCapital;
+        if (params.marketType != null) payload.marketType = marketType;
         if (leverage != null) payload.leverage = leverage;
         if (buyLimit != null) payload.buyLimit = buyLimit;
         if (params.chainId != null) payload.chainId = params.chainId;
