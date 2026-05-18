@@ -176,29 +176,33 @@ Please review your agent before funding your wallet.
 
 ## Where to deposit
 
-- *Deposit network:* {wallet.networkLabel}
-- *Deposit BNB to:* `{wallet.address}`
-- This deposit network is for billing setup and can differ from the trading market network
-- If deposit network is *BNB Chain Testnet*, add: `Need testnet BNB? Use the faucet: https://www.bnbchain.org/en/testnet-faucet`
+Use this exact structure when `fees.oswapShortfall > 0` (user needs OSWAP and it will be obtained via BNB swap):
 
-> The system will automatically swap the required BNB into OSWAP. You do not need to hold OSWAP separately.
+```
+**What you need to do:** Send ~{funding.totalBnbNeeded} BNB to the address below. That's it — the system will automatically use ~{funding.bnbForSwapMax} BNB to buy {fees.requiredOswap} OSWAP for billing, and keep ~{funding.bnbForGas} BNB for gas.
+
+- Deposit network: {wallet.networkLabel}
+- Send BNB to: `{wallet.address}`
+```
+
+Do NOT say "you need OSWAP" as an action item. The user's only action is to send BNB. Mention OSWAP only to explain what the BNB will be used for.
+
+If deposit network is BNB Chain Testnet, add: `Need testnet BNB? Use the faucet: https://www.bnbchain.org/en/testnet-faucet`
 
 ## Fund your wallet
 
 **MANDATORY - Always display billing wallet address:** When presenting any costs or funding instructions, the billing wallet address must be clearly shown in full (never abbreviated with `0x...`). This is critical for user safety and preventing funds from going to the wrong address.
 
-**MANDATORY - Default to BNB-only deposit when user needs OSWAP:** When `fees.oswapShortfall > 0` (user doesn't have enough OSWAP), do NOT ask the user to deposit OSWAP directly. Instead, tell them to send BNB only — the system will automatically swap the required BNB into OSWAP. Still mention how much OSWAP is needed so the user understands the cost, but the deposit instruction must say BNB only.
+**MANDATORY - Default to BNB-only deposit when user needs OSWAP:** When `fees.oswapShortfall > 0` (user doesn't have enough OSWAP), do NOT ask the user to deposit OSWAP directly. The user's one and only action is to send BNB. The system handles the swap automatically. Follow this exact wording pattern:
 
-You need:
+> Send *~{funding.totalBnbNeeded} BNB* to the address below. The system will automatically swap *~{funding.bnbForSwapMax} BNB* into *{fees.requiredOswap} OSWAP* for your billing, and use *~{funding.bnbForGas} BNB* for gas.
+>
+> **Deposit network:** {wallet.networkLabel}
+> **Send BNB to:** `{wallet.address}`
 
-- *{fees.requiredOswap} OSWAP* for billing (will be obtained by swapping BNB)
-- *~{funding.totalBnbNeeded} BNB* total (includes swap + gas)
+Never write a sentence like "You need X OSWAP for billing (obtained by swapping BNB) and ~Y BNB total." — this is confusing because it implies the user must source OSWAP themselves. Instead, state only the BNB amount and explain that the swap happens automatically.
 
-**Deposit BNB to:** `{wallet.address}`
-
-Send *~{funding.totalBnbNeeded} BNB* and I'll handle the swap and complete setup automatically.
-
-> If you already have OSWAP and prefer to send it directly, you can send *{fees.requiredOswap} OSWAP* + *~{funding.bnbForGas} BNB* for gas instead.
+> If the user already has OSWAP and prefers to send it directly, they can send *{fees.requiredOswap} OSWAP* + *~{funding.bnbForGas} BNB* for gas. Offer this as an optional note only, not the primary instruction.
 
 ## Funding details
 
@@ -219,7 +223,7 @@ Render rules:
   - Explicitly state the BNB deposit network and that it may differ from the trading market network.
   - If the deposit network is BNB Chain Testnet, include testnet faucet guidance: https://www.bnbchain.org/en/testnet-faucet
   - Never add meta wording about omitted zero-fee components in parentheses. Just show the clean non-zero fee equation.
-  - **If `fees.oswapShortfall > 0`**: The user doesn't have enough OSWAP. Show only the BNB deposit path as the primary instruction. Do NOT show a separate "Deposit OSWAP to" address. Mention the OSWAP amount needed (for transparency) but frame the action as "send BNB, I'll swap it". Optionally offer the manual OSWAP path as a secondary note.
+  - **If `fees.oswapShortfall > 0`**: The user's ONLY action is to send BNB. Use this exact pattern: "Send ~{funding.totalBnbNeeded} BNB to `{wallet.address}`. The system will automatically swap ~{funding.bnbForSwapMax} BNB into {fees.requiredOswap} OSWAP for billing and use ~{funding.bnbForGas} BNB for gas." Do NOT write a sentence like "You need X OSWAP ... and Y BNB total" — that confuses the user into thinking they must source OSWAP separately. Do NOT show a separate "Deposit OSWAP to" address. Optionally note the manual OSWAP path as a secondary aside only.
   - **If `fees.oswapShortfall = 0`**: The user already has enough OSWAP — show only the gas BNB needed. Say existing OSWAP covers the requirement. Do not show a swap option.
   - If `funding.bnbShortfall = 0`, say wallet is already funded and skip the "Fund your wallet" and "Funding details" sections. Go straight to asking for confirmation.
   - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, skip the funding sections entirely. Show a concise summary instead: existing eligible NFT, existing billing credit covers the first period, no upfront payment needed, remind about `subscription.renewalAmount` OSWAP by `subscription.estimatedEndTime` for auto renewal. Ask the user to confirm.
