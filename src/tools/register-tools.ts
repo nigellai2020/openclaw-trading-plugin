@@ -1136,7 +1136,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const result: Record<string, unknown> = {};
 
       // Step 1: Prepare encryption payload for wallet-agent delegation
-      // (trading-data forwards to wallet-agent TEE when delegateToWalletAgent is true)
+      // (trading-data always forwards to wallet-agent TEE)
       let agentWalletAddress: string;
       let walletAgentPublicKey = "";
       let teeEncryptedPrivateKey = "";
@@ -1217,7 +1217,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           walletType: "hyperliquid_agent",
           masterWalletAddress: params.masterWalletAddress,
           hyperliquidNetwork: params.network ?? "testnet",
-          delegateToWalletAgent: true,
           walletAgentPublicKey,
           encryptedPrivateKey: teeEncryptedPrivateKey,
           walletAgentSignedAt,
@@ -1928,7 +1927,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const signedAt = Math.floor(Date.now() / 1000);
       debugLog("delete_wallet", "entry", { walletAddress: params.walletAddress });
 
-      // Remove from trading-data (delegateToWalletAgent instructs server to also remove from TEE)
+      // Remove from trading-data (server always also removes from TEE)
       try {
         const createdAt = signedAt;
         const sigData = { created_at: createdAt, wallet_address: params.walletAddress, action: "disconnected", npub };
@@ -1938,7 +1937,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         const res = await fetch(`${baseUrl}/api/wallets`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json", Authorization: auth },
-          body: JSON.stringify({ npub, walletAddress: params.walletAddress, signature, createdAt, agents: [], delegateToWalletAgent: true, walletAgentSignedAt: signedAt }),
+          body: JSON.stringify({ npub, walletAddress: params.walletAddress, signature, createdAt, agents: [], walletAgentSignedAt: signedAt }),
         });
         debugLog("delete_wallet", "trading-data.res", { status: res.status });
         result.tradingData = { ok: res.ok };
