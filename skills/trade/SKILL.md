@@ -1,13 +1,17 @@
 ---
 name: trade
-description: Create a new paper or live trading agent. Use when the user wants to start trading, deploy a new trading agent, set up paper trading, or trade on Hyperliquid or EVM networks. Do not use this skill to copy an existing agent.
+description: Create a new paper or live trading agent, including copying an existing public agent. Use when the user wants to start trading, deploy a new trading agent, set up paper trading, trade on Hyperliquid or EVM networks, or copy/follow an existing public agent.
 ---
 
 # Trading Agent Creation
 
-Follow these steps to create a paper or live trading agent.
+Follow these steps to create a paper or live trading agent. This skill covers both **original agents** (user-defined strategy) and **copy agents** (copying an existing public agent).
 
-If the user wants to copy, follow, or duplicate an existing agent, use the `copy-trade` skill instead of this one.
+**Copy-agent path:** If the user wants to copy, follow, or duplicate an existing agent, that is handled by this same skill. When in copy mode, Steps 1–4 are the same, Step 5 (Build strategy) is **skipped**, and the `sourceAgentId` is passed to `prepare_agent_creation` and `deploy_agent` instead of a strategy object.
+
+**No-fabrication rule (strict):** Do not invent, auto-fill, or infer values the user did not provide. Keep optional fields omitted. If a required field is missing or ambiguous, ask the user a direct follow-up question before calling tools.
+
+For copy-agent requests, pass only what the user explicitly provided plus `sourceAgentId`. Do not fabricate `chainId`, `marketType`, `symbol`, `leverage`, `initialCapital`, or `isPrivate`.
 
 ## Step 1 — Ask trading mode and resolve market/network
 Ask the user: **paper** or **live** mode?
@@ -25,6 +29,7 @@ Then resolve the missing choices before continuing:
     - mainnet → `chainId: 999`
   - For EVM (e.g. Ethereum, BSC, Arbitrum, Base): ask or infer the chain ID.
 - Do not ask again if the user already specified the asset type, market type, or network.
+- Copy-agent exception: when `sourceAgentId` is provided and required fields are missing, ask follow-up questions instead of auto-filling.
 
 ## Step 2 — Initialize session
 Call `init_trading_session` with the chosen `mode`.
@@ -56,8 +61,11 @@ Handle the response:
 - **registration.ok = false**: Report the error and STOP.
 - Save `teeStorage.agentWalletAddress`, `registration.walletId`, and `registration.walletAddress`.
 
-## Step 5 — Build strategy
-Ask the user for an agent name if they have not already provided one.
+## Step 5 — Build strategy _(skip for copy agents)_
+
+**Copy-agent path:** If the user is copying an existing agent, skip this entire step. Ask for the source agent ID (or search by name using `search_public_agents` if needed). Record it as `sourceAgentId`.
+
+**Original-agent path:** Ask the user for an agent name if they have not already provided one.
 
 Ask the user what trading strategy they want. Construct a strategy object with:
 - **indicators**: technical indicators with type, name, period, timeframe, and params
@@ -66,7 +74,9 @@ Ask the user what trading strategy they want. Construct a strategy object with:
 
 For detailed schema references, see the `strategy-reference` skill.
 
-If the user says something general like "EMA crossover", construct a reasonable default. Example for EMA 20/50 crossover on M15:
+If the user says something general like "EMA crossover", ask a concise clarification question first (for example timeframe, entry/exit logic, and risk settings) before constructing the strategy.
+
+Only build a strategy after the user confirms the missing details. Example format for EMA 20/50 crossover on M15:
 ```json
 {
   "name": "ema_crossover",
@@ -83,12 +93,12 @@ If the user says something general like "EMA crossover", construct a reasonable 
 }
 ```
 
-If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless they explicitly specify a different value. Set `strategy.risk_manager.leverage` accordingly.
+For live perp agents, ask the user for leverage if they did not provide it. Do not default leverage.
 
 ## Step 6 — Determine initial capital
-- **Live on Hyperliquid (chainId 998/999)**: `deploy_agent` auto-fetches the wallet balance as initial capital. **Do NOT ask the user for initial capital.** Do NOT call `get_hyperliquid_balance` separately.
-- **Live on other networks**: `deploy_agent` cannot auto-fetch the balance. **Ask the user for their desired initial capital.**
-- **Paper**: Ask the user for their desired initial capital.
+- Paper mode: ask the user for `initialCapital`.
+- Live mode: `initialCapital` is optional because the API can derive it; only pass it when the user explicitly provides it.
+- Do not assume or auto-fetch initial capital in the plugin.
 
 ## Step 7 — Run billing preflight
 - Explain that OpenClaw uses the configured `nostrPrivateKey` as the BSC/Ethereum signing key for any required NFT checks, OSWAP funding, vault credit deposit, and billing auth.
@@ -96,8 +106,9 @@ If live: leverage defaults to 3x. **Do NOT ask the user for leverage** unless th
 - Explain that the plugin loads all active NFT configs from `/api/nft-config` and only uses the cheapest eligible NFT when a new mint is required.
 - `prepare_agent_creation` is a **read-only preflight**. It does **not** authorize deployment. After calling it, your next message must present the summary and ask for confirmation. Do **not** call `deploy_agent` in the same turn as the preflight.
 - Call `prepare_agent_creation` with:
-  - Paper: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
-  - Live: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
+  - Paper original: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
+  - Live original: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
+  - Copy agent: `name`, `mode`, and `sourceAgentId` — do **not** pass `marketType`, `symbol`, `chainId`, `leverage`, `initialCapital`, or `isPrivate` unless the user explicitly requests an override
 - If `prepare_agent_creation.billing.required = false`, say no upfront billing setup is required and skip to Step 8.
 - If `prepare_agent_creation.billing.required = true`, present the checkout page described below.
 - If `prepare_agent_creation` reports an `error`, STOP and explain it.
@@ -161,30 +172,37 @@ Please review your agent before funding your wallet.
 - Current BNB shortfall: *~{funding.bnbShortfall} BNB*
 - Explain the shortfall in plain language. Example: "The ~0.018 BNB shortfall is made up of ~0.015 BNB to swap into OSWAP plus ~0.003 BNB for gas."
 
+**IMPORTANT:** Once the fee breakdown and shortfall are presented, immediately show the billing wallet address in the "Where to deposit" section. **Always display the full billing wallet address (never abbreviated) whenever there are upfront costs for the user to pay.** This ensures the user knows exactly where to send funds.
+
 ## Where to deposit
 
-- *Deposit network:* {wallet.networkLabel}
-- *Deposit BNB to:* `{wallet.address}`
-- This deposit network is for billing setup and can differ from the trading market network
-- If deposit network is *BNB Chain Testnet*, add: `Need testnet BNB? Use the faucet: https://www.bnbchain.org/en/testnet-faucet`
+Use this exact structure when `fees.oswapShortfall > 0` (user needs OSWAP and it will be obtained via BNB swap):
+
+```
+**What you need to do:** Send only the missing *~{funding.bnbShortfall} BNB* to the address below. Do not send the full *~{funding.totalBnbNeeded} BNB* unless the wallet is empty. After this top-up, the wallet will have enough BNB in total. The system will then automatically use ~{funding.bnbForSwapMax} BNB to buy {fees.requiredOswap} OSWAP for billing, and keep ~{funding.bnbForGas} BNB for gas.
+
+- Deposit network: {wallet.networkLabel}
+- Send BNB to: `{wallet.address}`
+```
+
+Do NOT say "you need OSWAP" as an action item. The user's only action is to send BNB. Mention OSWAP only to explain what the BNB will be used for.
+
+If deposit network is BNB Chain Testnet, add: `Need testnet BNB? Use the faucet: https://www.bnbchain.org/en/testnet-faucet`
 
 ## Fund your wallet
 
-You need:
+**MANDATORY - Always display billing wallet address:** When presenting any costs or funding instructions, the billing wallet address must be clearly shown in full (never abbreviated with `0x...`). This is critical for user safety and preventing funds from going to the wrong address.
 
-- *{fees.requiredOswap} OSWAP* for the first billing period
-- *~{funding.bnbForGas} BNB* for network fees
+**MANDATORY - Default to BNB-only deposit when user needs OSWAP:** When `fees.oswapShortfall > 0` (user doesn't have enough OSWAP), do NOT ask the user to deposit OSWAP directly. The user's one and only action is to send BNB. The system handles the swap automatically. Follow this exact wording pattern:
 
-### Option 1 — Easiest
+> Send only the missing *~{funding.bnbShortfall} BNB* to the address below. Do not ask the user to send the full *~{funding.totalBnbNeeded} BNB* unless the wallet currently has zero BNB. The system will automatically swap *~{funding.bnbForSwapMax} BNB* into *{fees.requiredOswap} OSWAP* for your billing, and use *~{funding.bnbForGas} BNB* for gas.
+>
+> **Deposit network:** {wallet.networkLabel}
+> **Send BNB to:** `{wallet.address}`
 
-Send *~{funding.totalBnbNeeded} BNB* and I'll handle the swap and complete setup.
+Never write a sentence like "You need X OSWAP for billing (obtained by swapping BNB) and ~Y BNB total." — this is confusing because it implies the user must source OSWAP themselves. Also never tell the user to send the full `funding.totalBnbNeeded` when `funding.bnbShortfall` is smaller. The deposit instruction must use the missing top-up amount, not the total requirement.
 
-### Option 2 — Manual
-
-Send:
-
-- *{fees.requiredOswap} OSWAP*
-- *~{funding.bnbForGas} BNB*
+> If the user already has OSWAP and prefers to send it directly, they can send *{fees.requiredOswap} OSWAP* + *~{funding.bnbForGas} BNB* for gas. Offer this as an optional note only, not the primary instruction.
 
 ## Funding details
 
@@ -205,10 +223,11 @@ Render rules:
   - Explicitly state the BNB deposit network and that it may differ from the trading market network.
   - If the deposit network is BNB Chain Testnet, include testnet faucet guidance: https://www.bnbchain.org/en/testnet-faucet
   - Never add meta wording about omitted zero-fee components in parentheses. Just show the clean non-zero fee equation.
-  - If `fees.oswapShortfall = 0`, the user already has enough OSWAP — hide Option 1 (swap) and adjust the "You need" section to only show gas fees. Say existing OSWAP covers the requirement.
+  - **If `fees.oswapShortfall > 0`**: The user's ONLY action is to send BNB. Use the missing top-up amount: `funding.bnbShortfall`, not `funding.totalBnbNeeded`, unless the wallet currently has zero BNB and the two values are the same. Use this exact pattern: "Send only ~{funding.bnbShortfall} BNB to `{wallet.address}`. The system will automatically swap ~{funding.bnbForSwapMax} BNB into {fees.requiredOswap} OSWAP for billing and use ~{funding.bnbForGas} BNB for gas." Do NOT write a sentence like "You need X OSWAP ... and Y BNB total" — that confuses the user into thinking they must source OSWAP separately. Do NOT show a separate "Deposit OSWAP to" address. Optionally note the manual OSWAP path as a secondary aside only.
+  - **If `fees.oswapShortfall = 0`**: The user already has enough OSWAP — show only the gas BNB needed. Say existing OSWAP covers the requirement. Do not show a swap option.
   - If `funding.bnbShortfall = 0`, say wallet is already funded and skip the "Fund your wallet" and "Funding details" sections. Go straight to asking for confirmation.
   - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, skip the funding sections entirely. Show a concise summary instead: existing eligible NFT, existing billing credit covers the first period, no upfront payment needed, remind about `subscription.renewalAmount` OSWAP by `subscription.estimatedEndTime` for auto renewal. Ask the user to confirm.
-  - For live mode, omit "Initial Capital" from the Agent section (it is auto-fetched from wallet balance).
+  - Include "Initial Capital" whenever it is part of the confirmed request.
   - Do not show raw chain IDs in user-facing summaries unless the user explicitly requests technical details.
 
 Ask the user to confirm or say "Done" after funding. Do NOT proceed until they explicitly confirm.
@@ -221,18 +240,28 @@ Confirmation rules:
 
 ## Step 9 — Deploy agent
 Call `deploy_agent` with:
-- `name`, `strategy`, `mode`, `marketType`
+- `name`, `mode`, `marketType`
 - `assetType`: always pass `"crypto"` or `"stocks"`
 - `chainId`: **required when `assetType` is `"crypto"`** — pass for both paper and live modes
 - `symbol`: always pass when known
-- If perp: `leverage` (same as `strategy.risk_manager.leverage`)
+- **Original agent:** also pass `strategy`; if perp: `leverage` (same as `strategy.risk_manager.leverage`)
+- **Copy agent:** pass `sourceAgentId` instead of `strategy` — do **not** pass a `strategy` object or `isPrivate`. Keep other optional fields omitted unless the user explicitly asked to override them.
+
+If required deploy inputs are missing, ask the user for the missing fields and wait. Do not guess.
 - Paper: `initialCapital`
-- Live: `walletAddress`, `masterWalletAddress`. For Hyperliquid (chainId 998/999), `initialCapital` is auto-fetched from the wallet balance — do NOT pass it. For other networks, pass `initialCapital` explicitly.
+- Live: `walletAddress` and `masterWalletAddress`. Include `initialCapital` only if the user explicitly provides it.
+- Include `buyLimit` only when the user explicitly asks to set it.
+
+Copy-agent payload minimums:
+- Preferred minimal payload: `name`, `sourceAgentId`, optional `mode` if user specified.
+- Only include `marketType`, `symbol`, `chainId`, `leverage`, or `initialCapital` when the user explicitly asked to override source-agent defaults.
+- Only include `buyLimit` when the user explicitly asked to set it.
 
 Important:
 - Do **not** pass `simulationConfig` — it is not in the API spec.
 - Do **not** pass `walletId` or `protocol` — not in the API spec.
-- Do **not** omit `chainId` for crypto agents, even in paper mode.
+- Do **not** omit `chainId` for crypto original-agent flows, even in paper mode.
+- For copy-agent flows, omit `chainId` unless the user explicitly asked for an override.
 
 Handle the response:
 - **create.ok = false**: Report error and STOP.

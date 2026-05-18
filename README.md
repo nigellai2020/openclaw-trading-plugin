@@ -1,6 +1,6 @@
 # trading-plugin
 
-OpenClaw plugin for trading data, paper trading, live trading (Hyperliquid), and backtesting.
+OpenClaw plugin for trading data, paper trading, live trading (Hyperliquid), copy-trading, and backtesting.
 
 ## Install
 
@@ -42,6 +42,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | `get_token_prices` | Get current live token prices for all tracked tokens or a normalized symbol list |
 | `get_ohlc`         | Get OHLC candle data for a symbol |
 | `get_agent_trades` | Get past trades / trade history for a single agent with optional `range` (`1d`, `7d`, etc.) or explicit timestamps |
+| `get_open_positions` | Get the current open positions for a single agent |
 
 `get_token_prices` accepts an optional `symbols` array. OpenClaw should normalize user input before calling it and pass uppercase base-token symbols like `ETH` or `BTC`. If malformed symbols are provided, the tool returns a validation error so OpenClaw can retry.
 
@@ -56,13 +57,11 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | Tool                      | Description                                                                 |
 | ------------------------- | --------------------------------------------------------------------------- |
 | `init_trading_session`    | Initialize session: check keys and optionally list wallets                 |
-| `prepare_agent_creation`  | Preflight agent creation and summarize any required billing, NFT, or vault setup |
-| `prepare_copy_agent`      | Validate source agent and optional wallet defaults before creating a copied live agent |
+| `prepare_agent_creation`  | Preflight for direct or copy-agent creation — summarize billing, NFT, or vault setup. Pass `sourceAgentId` to preflight a copy agent |
 | `setup_live_wallet`       | Store agent wallet key in TEE and register in backend                       |
-| `deploy_agent`            | Create agent, run any required billing setup, notify bot, register trader (live), log action, verify |
-| `deploy_copy_agent`       | Create a live copy-trading agent from an existing source agent and sync follow-up systems |
+| `deploy_agent`            | Create agent (direct or copy), run billing setup, notify bot, register trader (live), log action, verify. Pass `sourceAgentId` to create a copy agent |
 | `get_agent`               | Get agent details by ID                                                     |
-| `update_agent`            | Update only the requested agent fields across the supported backends        |
+| `update_agent`            | Update only the requested agent fields across the supported backends. Pass `copiedFromAgentId` to switch the source agent being followed |
 | `get_hyperliquid_balance` | Get USDC balance of a Hyperliquid master wallet                             |
 
 ### Backtesting
@@ -78,8 +77,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 
 | Skill                | Description                              |
 | -------------------- | ---------------------------------------- |
-| `trade`              | Guided workflow for creating new paper or live agents |
-| `copy-trade`         | Guided workflow for creating live copied agents from an existing source agent |
+| `trade`              | Guided workflow for creating new paper, live, or copy agents |
 | `manage-agents`      | Guided workflow for listing, updating, and deleting agents |
 | `manage-wallets`     | Guided workflow for listing and deleting wallets |
 | `market-data`        | Guided workflow for current token prices and historical market data |

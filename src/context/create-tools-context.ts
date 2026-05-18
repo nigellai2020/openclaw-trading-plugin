@@ -48,6 +48,7 @@ export function createToolsContext(api: any) {
   const tradingBotUrl: string = pluginConfig.tradingBotUrl ?? DEFAULT_BOT_URL;
   const walletAgentUrl: string = pluginConfig.walletAgentUrl ?? DEFAULT_WALLET_AGENT_URL;
   const settlementEngineUrl: string = pluginConfig.settlementEngineUrl ?? DEFAULT_SETTLEMENT_ENGINE_URL;
+  const enableAmmSpot: boolean = pluginConfig.enableAmmSpot === true;
   const billingEvmConfig = buildBillingEvmConfig(pluginConfig);
   const billingProvider = new JsonRpcProvider(billingEvmConfig.rpcUrl);
 
@@ -61,8 +62,41 @@ export function createToolsContext(api: any) {
     } catch {}
   }
 
+  const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+  const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
+  const INTEGER_PATTERN = /^-?\d+$/;
+
+  function toSafeInteger(value: string): number | undefined {
+    if (!INTEGER_PATTERN.test(value)) return undefined;
+    try {
+      const big = BigInt(value);
+      if (big > MAX_SAFE_BIGINT || big < MIN_SAFE_BIGINT) return undefined;
+      return Number(big);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function normalizeSafeIntegers<T>(value: T): T {
+    if (value === null || value === undefined) return value;
+    if (typeof value === "string") {
+      const converted = toSafeInteger(value);
+      return (converted === undefined ? value : converted) as T;
+    }
+    if (typeof value !== "object") return value;
+    if (Array.isArray(value)) {
+      return value.map((item) => normalizeSafeIntegers(item)) as T;
+    }
+
+    const normalized: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      normalized[key] = normalizeSafeIntegers(nested);
+    }
+    return normalized as T;
+  }
+
   function extractApiData<T = any>(body: any): T {
-    return (body?.data ?? body) as T;
+    return normalizeSafeIntegers((body?.data ?? body) as T);
   }
 
   function responseErrorMessage(body: any): string {
@@ -86,6 +120,12 @@ export function createToolsContext(api: any) {
 
   function resolveMarketType(_mode: string, marketType?: string): "spot" | "perp" {
     return marketType === "perp" ? "perp" : "spot";
+  }
+
+  function ensureAmmSpotEnabled(mode: string, marketType?: string): void {
+    if (mode === "live" && marketType === "spot" && !enableAmmSpot) {
+      throw new Error("AMM Spot is disabled by plugin configuration. This stage only supports Hyperliquid Perps.");
+    }
   }
 
   function resolveLiveChainId(chainId?: number): 998 | 999 {
@@ -962,10 +1002,12 @@ export function createToolsContext(api: any) {
     tradingBotUrl,
     walletAgentUrl,
     settlementEngineUrl,
+    enableAmmSpot,
     billingEvmConfig,
     debugLog,
     responseErrorMessage,
     resolveMarketType,
+    ensureAmmSpotEnabled,
     resolveLiveChainId,
     hasOwnField,
     normalizeAddress,

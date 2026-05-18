@@ -16,20 +16,14 @@ If the user asks about billing subscriptions, renewal status, or next billing da
 ## Update an agent
 1. If the user has not specified an agent ID, call `list_my_agents` first and ask which agent to update.
 2. Call `get_agent` if you need a quick public summary before confirming the change.
-3. Call `update_agent` with only the fields the user explicitly wants changed.
+3. Call `update_agent` with only the fields the user explicitly wants changed. Do not infer or auto-fill missing values.
 4. `chainId` can be set for both paper and live agents — it selects the network (Hyperliquid 998/999 or EVM chain ID).
-5. If the requested change touches live runtime fields (`walletId`, `walletAddress`, `masterWalletAddress`, `symbol`, `chainId`, `protocol`, `buyLimit`) and the tool reports missing companion fields, ask the user only for the missing companion fields needed to safely rebuild the live config.
-6. Report the `tradingData` result. If the tool returns `warnings`, surface them verbatim.
-
-## Update a copied agent
-1. If the user is updating a copied/followed agent, use `update_copied_agent` (not `update_agent`).
-2. Supported copied-agent fields include: `alias`, `buyLimit`, `order`, `walletAddress`, `agentAddress`, and `copiedFromAgentId`.
-3. For wallet changes, do not ask for `walletId`; the backend resolves it from `walletAddress` or `agentAddress`.
-4. If the user wants to switch which source agent is followed, pass `copiedFromAgentId`.
-5. Report whether the tool returned `ok: true`. If false, show the backend error message and stop.
+5. If the requested change touches live runtime fields (`walletId`, `walletAddress`, `masterWalletAddress`, `symbol`, `chainId`, `protocol`, `buyLimit`) and the tool reports missing companion fields, ask the user only for the missing companion fields before retrying.
+6. **Copied agents — switching source:** If the user wants to switch which source agent a copied agent follows, pass `copiedFromAgentId` to `update_agent`. Do not pass `isPrivate` together with `copiedFromAgentId` (copied agents are always private).
+7. Report the `tradingData` result. If the tool returns `warnings`, surface them verbatim.
 
 ## Delete an agent
 1. If the user hasn't specified an agent ID, call `list_my_agents` first and ask which one to delete.
 2. Confirm with the user before deleting — show the agent name and ID.
-3. Call `delete_agent` with the `agentId`. The server handles all delegation (trading-bot and settlement) internally via `delegateToTradingBot` and `delegateToSettlement` flags.
+3. Call `delete_agent` with the `agentId`. The server handles all delegation (trading-bot and settlement) internally.
 4. Report `tradingData.ok`. If it failed, say deletion may be incomplete.
