@@ -73,6 +73,7 @@ export function formatFillNotification(event: any): string {
     base_amount,
     execution_price,
     success,
+    pnl,
   } = event;
   const agentDisplayName = agent_name || "Unknown Agent";
   const agentLabel = typeof agent_id === "number"
@@ -86,7 +87,11 @@ export function formatFillNotification(event: any): string {
   const action = is_entry ? "Opened" : "Closed";
   const sideLabel = String(side ?? "UNKNOWN").toUpperCase();
   const symbolLabel = String(symbol ?? "Unknown Symbol").toUpperCase();
-  return `[Trade Executed] Agent ${agentLabel}: ${action} ${sideLabel} ${base_amount} ${symbolLabel} @ $${execution_price}`;
+  const pnlValue = typeof pnl === "number" ? pnl : Number(pnl);
+  const pnlSuffix = !is_entry && Number.isFinite(pnlValue)
+    ? ` | PnL: ${pnlValue >= 0 ? "+" : ""}$${pnlValue.toFixed(4)}`
+    : "";
+  return `[Trade Executed] Agent ${agentLabel}: ${action} ${sideLabel} ${base_amount} ${symbolLabel} @ $${execution_price}${pnlSuffix}`;
 }
 
 function readOpenClawConfig(): { botToken: string | null; chatId: string | null } {
