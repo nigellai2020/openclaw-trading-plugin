@@ -57,9 +57,9 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | Tool                      | Description                                                                 |
 | ------------------------- | --------------------------------------------------------------------------- |
 | `init_trading_session`    | Initialize session: check keys and optionally list wallets                 |
-| `prepare_agent_creation`  | Preflight for direct or copy-agent creation — summarize billing, NFT, or vault setup. Pass `sourceAgentId` to preflight a copy agent |
+| `prepare_agent_creation`  | Preflight for direct or copy-agent creation — summarize billing, NFT, or vault setup. Pass `copiedFromAgentId` to preflight a copy agent |
 | `setup_live_wallet`       | Store agent wallet key in TEE and register in backend                       |
-| `deploy_agent`            | Create agent (direct or copy), run billing setup, notify bot, register trader (live), log action, verify. Pass `sourceAgentId` to create a copy agent |
+| `deploy_agent`            | Create agent (direct or copy), run billing setup, notify bot, register trader (live), log action, verify. Pass `copiedFromAgentId` to create a copy agent |
 | `get_agent`               | Get agent details by ID                                                     |
 | `update_agent`            | Update only the requested agent fields across the supported backends. Pass `copiedFromAgentId` to switch the source agent being followed |
 | `get_hyperliquid_balance` | Get USDC balance of a Hyperliquid master wallet                             |
