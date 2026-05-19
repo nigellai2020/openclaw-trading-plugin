@@ -1400,7 +1400,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when copiedFromAgentId is provided, omit unless user explicitly requests override.' })),
       strategy: Type.Optional(Strategy),
       strategyDescription: Type.Optional(Type.String({ description: "Human-readable strategy summary" })),
-      copiedFromAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
+      copiedFromAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Required when strategy is omitted. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
       assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation.' })),
       walletAddress: Type.Optional(Type.String({ description: "Agent wallet address (live mode)" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (live mode, for settlement)" })),
@@ -1433,6 +1433,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
       const isCopyAgent = params.copiedFromAgentId != null;
+      if (!params.strategy && !isCopyAgent) {
+        return textResult({
+          error:
+            "strategy is required when copiedFromAgentId is not provided. " +
+            "For copy deployment, provide copiedFromAgentId. For direct deployment, provide strategy.",
+        });
+      }
       if (params.mode == null) {
         return textResult({ error: 'mode is required. Ask the user to choose "paper" or "live".' });
       }
