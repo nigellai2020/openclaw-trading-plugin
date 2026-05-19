@@ -1467,6 +1467,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const mode = params.mode;
       const isLive = mode === "live";
       let marketType: "spot" | "perp" | undefined;
+      let resolvedChainId: number | undefined = params.chainId;
       try {
         if (!isCopyAgent && params.marketType == null) {
           return textResult({ error: 'marketType is required for non-copy agents. Ask the user for "spot" or "perp".' });
@@ -1481,8 +1482,37 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           return textResult({ error: "symbol is required for non-copy agents. Ask the user for the trading pair (for example, ETH/USDC)." });
         }
         if (params.marketType != null) marketType = resolveMarketType(mode, params.marketType);
-        if (params.chainId != null && marketType != null) {
-          const chainErr = validateChainIdForMarketType(params.chainId, marketType);
+
+        if (isLive && marketType === "perp" && resolvedChainId == null && params.walletAddress) {
+          try {
+            const wallets = await fetchWalletsForUpdate(auth);
+            const walletRecord = resolveWalletRecord(wallets, {
+              walletAddress: params.walletAddress,
+            });
+            if (walletRecord?.hyperliquid_network === "testnet") {
+              resolvedChainId = 998;
+            } else if (walletRecord?.hyperliquid_network === "mainnet") {
+              resolvedChainId = 999;
+            }
+          } catch (e: any) {
+            debugLog("deploy_agent", "wallet-network-infer.error", { error: e.message });
+          }
+        }
+
+        if (isLive && marketType === "perp" && resolvedChainId == null && isCopyAgent) {
+          return textResult({
+            error:
+              "chainId is required for live copied perp agents when wallet network cannot be inferred. " +
+              "Provide 998 for Hyperliquid Testnet or 999 for Hyperliquid Mainnet.",
+          });
+        }
+
+        if (isLive && marketType === "perp" && resolvedChainId != null) {
+          resolvedChainId = resolveLiveChainId(resolvedChainId);
+        }
+
+        if (resolvedChainId != null && marketType != null) {
+          const chainErr = validateChainIdForMarketType(resolvedChainId, marketType);
           if (chainErr) return textResult({ error: chainErr });
         }
         if (isLive) {
@@ -1699,7 +1729,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (params.marketType != null) payload.marketType = marketType;
         if (leverage != null) payload.leverage = leverage;
         if (buyLimit != null) payload.buyLimit = buyLimit;
-        if (params.chainId != null) payload.chainId = params.chainId;
+        if (resolvedChainId != null) payload.chainId = resolvedChainId;
         if (params.assetType) payload.assetType = params.assetType;
         if (params.strategy) payload.strategy = params.strategy;
         if (params.strategyDescription) payload.strategyDescription = params.strategyDescription;
