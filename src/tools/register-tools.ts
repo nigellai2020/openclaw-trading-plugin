@@ -1314,9 +1314,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       mode: Type.Optional(Type.String({ description: '"paper" or "live". Optional; omit unless specified by the user.' })),
-      marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when sourceAgentId is provided, omit unless the user explicitly asks to override.' })),
+      marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when copiedFromAgentId is provided, omit unless the user explicitly asks to override.' })),
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
-      sourceAgentId: Type.Optional(Type.Number({ description: "When copying an existing public agent, pass the source agent ID. symbol and marketType are resolved from the source by default; do not fabricate or pass optional overrides unless explicitly requested." })),
+      copiedFromAgentId: Type.Optional(Type.Number({ description: "When copying an existing public agent, pass the source agent ID. symbol and marketType are resolved from the source by default; do not fabricate or pass optional overrides unless explicitly requested." })),
     }),
     async execute(
       _id: string,
@@ -1325,12 +1325,12 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         mode?: string;
         marketType?: string;
         symbol?: string;
-        sourceAgentId?: number;
+        copiedFromAgentId?: number;
       },
     ) {
       const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
       const effectiveMode = params.mode ?? "paper";
-      const effectiveMarketType = params.marketType ?? (params.sourceAgentId != null ? undefined : "spot");
+      const effectiveMarketType = params.marketType ?? (params.copiedFromAgentId != null ? undefined : "spot");
       try {
         ensureAmmSpotEnabled(effectiveMode, effectiveMarketType);
       } catch (e: any) {
@@ -1341,13 +1341,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         mode: effectiveMode,
         marketType: params.marketType ?? "spot",
         symbol: params.symbol,
-        sourceAgentId: params.sourceAgentId,
+        copiedFromAgentId: params.copiedFromAgentId,
         usesNostrPrivateKey: true,
       });
-      if (params.sourceAgentId) {
+      if (params.copiedFromAgentId) {
         let sourceAgent: any;
         try {
-          sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId);
+          sourceAgent = await fetchPublicAgentProfile(params.copiedFromAgentId);
         } catch (e: any) {
           return textResult({ error: e.message });
         }
@@ -1357,7 +1357,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             ? sourceAgent.symbol.trim()
             : undefined;
         if (!sourceSymbol) {
-          return textResult({ error: `Source agent ${params.sourceAgentId} is missing a trading pair; cannot prepare copy deployment` });
+          return textResult({ error: `Source agent ${params.copiedFromAgentId} is missing a trading pair; cannot prepare copy deployment` });
         }
         const sourceMarketType: "spot" | "perp" = sourceAgent?.marketType === "perp" ? "perp" : "spot";
         const effectiveMode: string = params.mode ?? sourceAgent?.mode ?? "paper";
@@ -1372,7 +1372,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             mode: effectiveMode,
             marketType: sourceMarketType,
             symbol: sourceSymbol,
-            agentId: params.sourceAgentId,
+            agentId: params.copiedFromAgentId,
             npub,
             publicKey,
             privateKey,
@@ -1380,7 +1380,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           return textResult({
             ...prepared.prepared,
             sourceAgent: {
-              id: params.sourceAgentId,
+              id: params.copiedFromAgentId,
               name: sourceAgent?.name ?? null,
               pair: sourceSymbol,
               mode: sourceAgent?.mode ?? null,
@@ -1422,10 +1422,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount" })),
       mode: Type.Optional(Type.String({ description: '"paper" or "live". Optional; omit unless specified by the user.' })),
-      marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when sourceAgentId is provided, omit unless user explicitly requests override.' })),
+      marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when copiedFromAgentId is provided, omit unless user explicitly requests override.' })),
       strategy: Type.Optional(Strategy),
       strategyDescription: Type.Optional(Type.String({ description: "Human-readable strategy summary" })),
-      sourceAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
+      copiedFromAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
       assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation.' })),
       walletAddress: Type.Optional(Type.String({ description: "Agent wallet address (live mode)" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (live mode, for settlement)" })),
@@ -1444,7 +1444,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         marketType?: string;
         strategy?: Record<string, unknown>;
         strategyDescription?: string;
-        sourceAgentId?: number;
+        copiedFromAgentId?: number;
         assetType?: string;
         walletAddress?: string;
         masterWalletAddress?: string;
@@ -1457,7 +1457,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     ) {
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
-      const isCopyAgent = params.sourceAgentId != null;
+      const isCopyAgent = params.copiedFromAgentId != null;
       if (params.mode == null) {
         return textResult({ error: 'mode is required. Ask the user to choose "paper" or "live".' });
       }
@@ -1473,7 +1473,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         }
         ensureAmmSpotEnabled(mode, params.marketType);
         if (isCopyAgent && params.marketType == null) {
-          const sourceAgent = await fetchPublicAgentProfile(params.sourceAgentId!);
+          const sourceAgent = await fetchPublicAgentProfile(params.copiedFromAgentId!);
           marketType = sourceAgent?.marketType === "perp" ? "perp" : "spot";
           ensureAmmSpotEnabled(mode, marketType);
         }
@@ -1703,7 +1703,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (params.assetType) payload.assetType = params.assetType;
         if (params.strategy) payload.strategy = params.strategy;
         if (params.strategyDescription) payload.strategyDescription = params.strategyDescription;
-        if (params.sourceAgentId != null) payload.copiedFromAgentId = params.sourceAgentId;
+        if (params.copiedFromAgentId != null) payload.copiedFromAgentId = params.copiedFromAgentId;
         if (params.walletAddress) payload.walletAddress = params.walletAddress;
         if (params.symbol) payload.symbol = params.symbol;
         if (settlementConfig) payload.settlement_config = settlementConfig;

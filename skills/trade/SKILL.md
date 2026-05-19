@@ -7,11 +7,11 @@ description: Create a new paper or live trading agent, including copying an exis
 
 Follow these steps to create a paper or live trading agent. This skill covers both **original agents** (user-defined strategy) and **copy agents** (copying an existing public agent).
 
-**Copy-agent path:** If the user wants to copy, follow, or duplicate an existing agent, that is handled by this same skill. When in copy mode, Steps 1–4 are the same, Step 5 (Build strategy) is **skipped**, and the `sourceAgentId` is passed to `prepare_agent_creation` and `deploy_agent` instead of a strategy object.
+**Copy-agent path:** If the user wants to copy, follow, or duplicate an existing agent, that is handled by this same skill. When in copy mode, Steps 1–4 are the same, Step 5 (Build strategy) is **skipped**, and the `copiedFromAgentId` is passed to `prepare_agent_creation` and `deploy_agent` instead of a strategy object.
 
 **No-fabrication rule (strict):** Do not invent, auto-fill, or infer values the user did not provide. Keep optional fields omitted. If a required field is missing or ambiguous, ask the user a direct follow-up question before calling tools.
 
-For copy-agent requests, pass only what the user explicitly provided plus `sourceAgentId`. Do not fabricate `chainId`, `marketType`, `symbol`, `leverage`, `initialCapital`, or `isPrivate`.
+For copy-agent requests, pass only what the user explicitly provided plus `copiedFromAgentId`. Do not fabricate `chainId`, `marketType`, `symbol`, `leverage`, `initialCapital`, or `isPrivate`.
 
 ## Step 1 — Ask trading mode and resolve market/network
 Ask the user: **paper** or **live** mode?
@@ -29,7 +29,7 @@ Then resolve the missing choices before continuing:
     - mainnet → `chainId: 999`
   - For EVM (e.g. Ethereum, BSC, Arbitrum, Base): ask or infer the chain ID.
 - Do not ask again if the user already specified the asset type, market type, or network.
-- Copy-agent exception: when `sourceAgentId` is provided and required fields are missing, ask follow-up questions instead of auto-filling.
+- Copy-agent exception: when `copiedFromAgentId` is provided and required fields are missing, ask follow-up questions instead of auto-filling.
 
 ## Step 2 — Initialize session
 Call `init_trading_session` with the chosen `mode`.
@@ -63,7 +63,7 @@ Handle the response:
 
 ## Step 5 — Build strategy _(skip for copy agents)_
 
-**Copy-agent path:** If the user is copying an existing agent, skip this entire step. Ask for the source agent ID (or search by name using `search_public_agents` if needed). Record it as `sourceAgentId`.
+**Copy-agent path:** If the user is copying an existing agent, skip this entire step. Ask for the source agent ID (or search by name using `search_public_agents` if needed). Record it as `copiedFromAgentId`.
 
 **Original-agent path:** Ask the user for an agent name if they have not already provided one.
 
@@ -108,7 +108,7 @@ For live perp agents, ask the user for leverage if they did not provide it. Do n
 - Call `prepare_agent_creation` with:
   - Paper original: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
   - Live original: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
-  - Copy agent: `name`, `mode`, and `sourceAgentId` — do **not** pass `marketType`, `symbol`, `chainId`, `leverage`, `initialCapital`, or `isPrivate` unless the user explicitly requests an override
+  - Copy agent: `name`, `mode`, and `copiedFromAgentId` — do **not** pass `marketType`, `symbol`, `chainId`, `leverage`, `initialCapital`, or `isPrivate` unless the user explicitly requests an override
 - If `prepare_agent_creation.billing.required = false`, say no upfront billing setup is required and skip to Step 8.
 - If `prepare_agent_creation.billing.required = true`, present the checkout page described below.
 - If `prepare_agent_creation` reports an `error`, STOP and explain it.
@@ -245,7 +245,7 @@ Call `deploy_agent` with:
 - `chainId`: **required when `assetType` is `"crypto"`** — pass for both paper and live modes
 - `symbol`: always pass when known
 - **Original agent:** also pass `strategy`; if perp: `leverage` (same as `strategy.risk_manager.leverage`)
-- **Copy agent:** pass `sourceAgentId` instead of `strategy` — do **not** pass a `strategy` object or `isPrivate`. Keep other optional fields omitted unless the user explicitly asked to override them.
+- **Copy agent:** pass `copiedFromAgentId` instead of `strategy` — do **not** pass a `strategy` object or `isPrivate`. Keep other optional fields omitted unless the user explicitly asked to override them.
 
 If required deploy inputs are missing, ask the user for the missing fields and wait. Do not guess.
 - Paper: `initialCapital`
@@ -253,7 +253,7 @@ If required deploy inputs are missing, ask the user for the missing fields and w
 - Include `buyLimit` only when the user explicitly asks to set it.
 
 Copy-agent payload minimums:
-- Preferred minimal payload: `name`, `sourceAgentId`, optional `mode` if user specified.
+- Preferred minimal payload: `name`, `copiedFromAgentId`, optional `mode` if user specified.
 - Only include `marketType`, `symbol`, `chainId`, `leverage`, or `initialCapital` when the user explicitly asked to override source-agent defaults.
 - Only include `buyLimit` when the user explicitly asked to set it.
 
