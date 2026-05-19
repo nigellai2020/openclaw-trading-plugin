@@ -220,13 +220,10 @@ export function createToolsContext(api: any) {
 
   function resolveWalletRecord(
     wallets: any[],
-    input: { walletId?: number | null; walletAddress?: string | null },
+    input: { walletAddress?: string | null },
   ): any | undefined {
     const normalizedWalletAddress = normalizeAddress(input.walletAddress);
     return wallets.find((wallet) => {
-      if (input.walletId != null && Number(wallet.id) === input.walletId) {
-        return true;
-      }
       if (normalizedWalletAddress && typeof wallet.wallet_address === "string") {
         return wallet.wallet_address.toLowerCase() === normalizedWalletAddress;
       }

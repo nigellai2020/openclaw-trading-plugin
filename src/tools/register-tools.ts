@@ -629,7 +629,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       chainId: Type.Optional(Type.Number({ description: "Updated settlement/simulation chain ID" })),
       protocol: Type.Optional(Type.String({ description: 'Updated protocol, e.g. "hyperliquid" or "uniswap_v3"' })),
       buyLimit: Type.Optional(Type.Number({ description: "Updated live-trading buy limit in USD" })),
-      walletId: Type.Optional(Type.Number({ description: "Wallet ID to resolve walletAddress/masterWalletAddress from" })),
       walletAddress: Type.Optional(Type.String({ description: "Updated agent/API wallet address" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Updated master wallet address used by settlement" })),
       simulationConfig: Type.Optional(SimulationConfigPatch),
@@ -657,7 +656,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         chainId?: number;
         protocol?: string;
         buyLimit?: number;
-        walletId?: number;
         walletAddress?: string;
         masterWalletAddress?: string;
         simulationConfig?: {
@@ -690,7 +688,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "chainId",
         "protocol",
         "buyLimit",
-        "walletId",
         "walletAddress",
         "masterWalletAddress",
         "simulationConfig",
@@ -785,28 +782,15 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       const currentWalletRecord = resolveWalletRecord(wallets, {
-        walletId: currentSettings?.walletId,
         walletAddress: currentSettings?.walletAddress,
       });
       const requestedWalletRecord = resolveWalletRecord(wallets, {
-        walletId: params.walletId,
         walletAddress: params.walletAddress,
       });
-      if (params.walletId != null && !requestedWalletRecord) {
+      if (params.walletAddress != null && !requestedWalletRecord) {
         return textResult({
           ...result,
-          error: `walletId ${params.walletId} was not found in the current wallet list`,
-        });
-      }
-      if (
-        params.walletId != null &&
-        params.walletAddress &&
-        requestedWalletRecord &&
-        normalizeAddress(requestedWalletRecord.wallet_address) !== normalizeAddress(params.walletAddress)
-      ) {
-        return textResult({
-          ...result,
-          error: "walletId and walletAddress refer to different wallets",
+          error: `walletAddress ${params.walletAddress} was not found in the current wallet list`,
         });
       }
 
@@ -815,7 +799,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const currentSymbol = inferSymbolFromStrategy(currentSettings?.strategy);
       const resolvedSymbol = params.symbol ?? inferSymbolFromStrategy(nextStrategy) ?? currentSymbol ?? null;
       const resolvedChainId = hasOwnField(params, "chainId") ? params.chainId ?? null : currentSettings?.chainId ?? null;
-      const resolvedWalletId = hasOwnField(params, "walletId") ? params.walletId ?? null : currentSettings?.walletId ?? null;
       const resolvedWalletAddress =
         params.walletAddress ??
         requestedWalletRecord?.wallet_address ??
@@ -862,7 +845,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       ];
       // Settlement-specific fields (excluding chainId which is needed for both paper and live)
       const settlementSpecificFields = [
-        "walletId",
         "walletAddress",
         "masterWalletAddress",
         "symbol",
@@ -873,10 +855,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         ...settlementSpecificFields,
         "chainId",  // For backwards compatibility in field list
       ];
-
-      if (hasOwnField(params, "walletId")) {
-        warnings.push("walletId is used only to resolve walletAddress/masterWalletAddress; there is no direct walletId update endpoint for agents.");
-      }
 
       // needsSettlementConfig = true if updating settlement-specific fields OR transitioning to live
       // chainId alone does NOT trigger settlement config (it's also used for paper simulation)
@@ -937,7 +915,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         marketType: currentMarketType,
         symbol: currentSymbol ?? null,
         chainId: currentSettings?.chainId ?? null,
-        walletId: currentSettings?.walletId ?? null,
         walletAddress: currentWalletAddress,
         masterWalletAddress: currentMasterWalletAddress,
         buyLimit: currentSettings?.buyLimit ?? null,
@@ -949,7 +926,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         marketType: targetMarketType,
         symbol: resolvedSymbol,
         chainId: resolvedChainId,
-        walletId: resolvedWalletId,
         walletAddress: resolvedWalletAddress,
         masterWalletAddress: resolvedMasterWalletAddress,
         buyLimit: resolvedBuyLimit,
@@ -1158,7 +1134,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             const wallets = (data.data || [])
               .filter((w: any) => w.is_active && w.wallet_type === "hyperliquid_agent")
               .map((w: any) => ({
-                walletId: w.id,
                 name: w.name,
                 walletAddress: w.wallet_address,
                 masterWalletAddress: w.master_wallet_address,
@@ -1243,7 +1218,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
         const existing = await findWallet();
         if (existing) {
-          result.registration = { ok: true, walletId: existing.id, walletAddress: existing.wallet_address };
+          result.registration = { ok: true, walletAddress: existing.wallet_address };
           debugLog("setup_live_wallet", "result", result);
           return textResult(result);
         }
@@ -1289,7 +1264,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (!res.ok) {
           const retry = await findWallet();
           if (retry) {
-            result.registration = { ok: true, walletId: retry.id, walletAddress: retry.wallet_address };
+            result.registration = { ok: true, walletAddress: retry.wallet_address };
             debugLog("setup_live_wallet", "result", result);
             return textResult(result);
           }
@@ -1298,7 +1273,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
         const created = await findWallet();
         if (!created) throw new Error("Wallet not found after registration");
-        result.registration = { ok: true, walletId: created.id, walletAddress: created.wallet_address };
+        result.registration = { ok: true, walletAddress: created.wallet_address };
       } catch (e: any) {
         result.registration = { ok: false, error: e.message };
       }
@@ -1425,7 +1400,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when copiedFromAgentId is provided, omit unless user explicitly requests override.' })),
       strategy: Type.Optional(Strategy),
       strategyDescription: Type.Optional(Type.String({ description: "Human-readable strategy summary" })),
-      copiedFromAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
+      copiedFromAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Required when strategy is omitted. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
       assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation.' })),
       walletAddress: Type.Optional(Type.String({ description: "Agent wallet address (live mode)" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (live mode, for settlement)" })),
@@ -1458,6 +1433,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
       const isCopyAgent = params.copiedFromAgentId != null;
+      if (!params.strategy && !isCopyAgent) {
+        return textResult({
+          error:
+            "strategy is required when copiedFromAgentId is not provided. " +
+            "For copy deployment, provide copiedFromAgentId. For direct deployment, provide strategy.",
+        });
+      }
       if (params.mode == null) {
         return textResult({ error: 'mode is required. Ask the user to choose "paper" or "live".' });
       }
@@ -1467,6 +1449,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const mode = params.mode;
       const isLive = mode === "live";
       let marketType: "spot" | "perp" | undefined;
+      let resolvedChainId: number | undefined = params.chainId;
       try {
         if (!isCopyAgent && params.marketType == null) {
           return textResult({ error: 'marketType is required for non-copy agents. Ask the user for "spot" or "perp".' });
@@ -1481,8 +1464,37 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           return textResult({ error: "symbol is required for non-copy agents. Ask the user for the trading pair (for example, ETH/USDC)." });
         }
         if (params.marketType != null) marketType = resolveMarketType(mode, params.marketType);
-        if (params.chainId != null && marketType != null) {
-          const chainErr = validateChainIdForMarketType(params.chainId, marketType);
+
+        if (isLive && marketType === "perp" && resolvedChainId == null && params.walletAddress) {
+          try {
+            const wallets = await fetchWalletsForUpdate(auth);
+            const walletRecord = resolveWalletRecord(wallets, {
+              walletAddress: params.walletAddress,
+            });
+            if (walletRecord?.hyperliquid_network === "testnet") {
+              resolvedChainId = 998;
+            } else if (walletRecord?.hyperliquid_network === "mainnet") {
+              resolvedChainId = 999;
+            }
+          } catch (e: any) {
+            debugLog("deploy_agent", "wallet-network-infer.error", { error: e.message });
+          }
+        }
+
+        if (isLive && marketType === "perp" && resolvedChainId == null && isCopyAgent) {
+          return textResult({
+            error:
+              "chainId is required for live copied perp agents when wallet network cannot be inferred. " +
+              "Provide 998 for Hyperliquid Testnet or 999 for Hyperliquid Mainnet.",
+          });
+        }
+
+        if (isLive && marketType === "perp" && resolvedChainId != null) {
+          resolvedChainId = resolveLiveChainId(resolvedChainId);
+        }
+
+        if (resolvedChainId != null && marketType != null) {
+          const chainErr = validateChainIdForMarketType(resolvedChainId, marketType);
           if (chainErr) return textResult({ error: chainErr });
         }
         if (isLive) {
@@ -1699,7 +1711,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (params.marketType != null) payload.marketType = marketType;
         if (leverage != null) payload.leverage = leverage;
         if (buyLimit != null) payload.buyLimit = buyLimit;
-        if (params.chainId != null) payload.chainId = params.chainId;
+        if (resolvedChainId != null) payload.chainId = resolvedChainId;
         if (params.assetType) payload.assetType = params.assetType;
         if (params.strategy) payload.strategy = params.strategy;
         if (params.strategyDescription) payload.strategyDescription = params.strategyDescription;
