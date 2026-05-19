@@ -36,7 +36,7 @@ Call `init_trading_session` with the chosen `mode`.
 
 Handle the response:
 - **keys.generated = true**: Inform the user a new Nostr identity was created. Do not display the private key or nsec unless asked.
-- **If live + wallets.wallets has entries**: Filter to the chosen network first, then present the active wallets (name, walletAddress, masterWalletAddress, network). Never use a markdown table. Never abbreviate `0x...` values. Show `walletAddress` and `masterWalletAddress` as full monospace lines. Ask which wallet to reuse. Save the chosen `walletId`, `walletAddress`, and `masterWalletAddress`, then continue to Step 5.
+- **If live + wallets.wallets has entries**: Filter to the chosen network first, then present the active wallets (name, walletAddress, masterWalletAddress, network). Never use a markdown table. Never abbreviate `0x...` values. Show `walletAddress` and `masterWalletAddress` as full monospace lines. Ask which wallet to reuse. Save the chosen `walletAddress` and `masterWalletAddress`, then continue to Step 5.
 - **If live + no wallets on the chosen network**: Continue to Step 3.
 - **If paper**: Skip to Step 5.
 
@@ -59,7 +59,7 @@ Call `setup_live_wallet` with `ethAgentPrivateKey`, `masterWalletAddress`, and `
 Handle the response:
 - **teeStorage.ok = false**: Report the error and STOP.
 - **registration.ok = false**: Report the error and STOP.
-- Save `teeStorage.agentWalletAddress`, `registration.walletId`, and `registration.walletAddress`.
+- Save `teeStorage.agentWalletAddress` and `registration.walletAddress`.
 
 ## Step 5 — Build strategy _(skip for copy agents)_
 
@@ -259,7 +259,7 @@ Copy-agent payload minimums:
 
 Important:
 - Do **not** pass `simulationConfig` — it is not in the API spec.
-- Do **not** pass `walletId` or `protocol` — not in the API spec.
+- Do **not** pass `protocol` — not in the API spec.
 - Do **not** omit `chainId` for crypto original-agent flows, even in paper mode.
 - For copy-agent flows, omit `chainId` unless the user explicitly asked for an override.
 

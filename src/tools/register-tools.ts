@@ -629,7 +629,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       chainId: Type.Optional(Type.Number({ description: "Updated settlement/simulation chain ID" })),
       protocol: Type.Optional(Type.String({ description: 'Updated protocol, e.g. "hyperliquid" or "uniswap_v3"' })),
       buyLimit: Type.Optional(Type.Number({ description: "Updated live-trading buy limit in USD" })),
-      walletId: Type.Optional(Type.Number({ description: "Wallet ID to resolve walletAddress/masterWalletAddress from" })),
       walletAddress: Type.Optional(Type.String({ description: "Updated agent/API wallet address" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Updated master wallet address used by settlement" })),
       simulationConfig: Type.Optional(SimulationConfigPatch),
@@ -657,7 +656,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         chainId?: number;
         protocol?: string;
         buyLimit?: number;
-        walletId?: number;
         walletAddress?: string;
         masterWalletAddress?: string;
         simulationConfig?: {
@@ -690,7 +688,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "chainId",
         "protocol",
         "buyLimit",
-        "walletId",
         "walletAddress",
         "masterWalletAddress",
         "simulationConfig",
@@ -785,28 +782,15 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       const currentWalletRecord = resolveWalletRecord(wallets, {
-        walletId: currentSettings?.walletId,
         walletAddress: currentSettings?.walletAddress,
       });
       const requestedWalletRecord = resolveWalletRecord(wallets, {
-        walletId: params.walletId,
         walletAddress: params.walletAddress,
       });
-      if (params.walletId != null && !requestedWalletRecord) {
+      if (params.walletAddress != null && !requestedWalletRecord) {
         return textResult({
           ...result,
-          error: `walletId ${params.walletId} was not found in the current wallet list`,
-        });
-      }
-      if (
-        params.walletId != null &&
-        params.walletAddress &&
-        requestedWalletRecord &&
-        normalizeAddress(requestedWalletRecord.wallet_address) !== normalizeAddress(params.walletAddress)
-      ) {
-        return textResult({
-          ...result,
-          error: "walletId and walletAddress refer to different wallets",
+          error: `walletAddress ${params.walletAddress} was not found in the current wallet list`,
         });
       }
 
@@ -815,7 +799,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const currentSymbol = inferSymbolFromStrategy(currentSettings?.strategy);
       const resolvedSymbol = params.symbol ?? inferSymbolFromStrategy(nextStrategy) ?? currentSymbol ?? null;
       const resolvedChainId = hasOwnField(params, "chainId") ? params.chainId ?? null : currentSettings?.chainId ?? null;
-      const resolvedWalletId = hasOwnField(params, "walletId") ? params.walletId ?? null : currentSettings?.walletId ?? null;
       const resolvedWalletAddress =
         params.walletAddress ??
         requestedWalletRecord?.wallet_address ??
@@ -862,7 +845,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       ];
       // Settlement-specific fields (excluding chainId which is needed for both paper and live)
       const settlementSpecificFields = [
-        "walletId",
         "walletAddress",
         "masterWalletAddress",
         "symbol",
@@ -873,10 +855,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         ...settlementSpecificFields,
         "chainId",  // For backwards compatibility in field list
       ];
-
-      if (hasOwnField(params, "walletId")) {
-        warnings.push("walletId is used only to resolve walletAddress/masterWalletAddress; there is no direct walletId update endpoint for agents.");
-      }
 
       // needsSettlementConfig = true if updating settlement-specific fields OR transitioning to live
       // chainId alone does NOT trigger settlement config (it's also used for paper simulation)
@@ -937,7 +915,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         marketType: currentMarketType,
         symbol: currentSymbol ?? null,
         chainId: currentSettings?.chainId ?? null,
-        walletId: currentSettings?.walletId ?? null,
         walletAddress: currentWalletAddress,
         masterWalletAddress: currentMasterWalletAddress,
         buyLimit: currentSettings?.buyLimit ?? null,
@@ -949,7 +926,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         marketType: targetMarketType,
         symbol: resolvedSymbol,
         chainId: resolvedChainId,
-        walletId: resolvedWalletId,
         walletAddress: resolvedWalletAddress,
         masterWalletAddress: resolvedMasterWalletAddress,
         buyLimit: resolvedBuyLimit,
@@ -1158,7 +1134,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             const wallets = (data.data || [])
               .filter((w: any) => w.is_active && w.wallet_type === "hyperliquid_agent")
               .map((w: any) => ({
-                walletId: w.id,
                 name: w.name,
                 walletAddress: w.wallet_address,
                 masterWalletAddress: w.master_wallet_address,
@@ -1243,7 +1218,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
         const existing = await findWallet();
         if (existing) {
-          result.registration = { ok: true, walletId: existing.id, walletAddress: existing.wallet_address };
+          result.registration = { ok: true, walletAddress: existing.wallet_address };
           debugLog("setup_live_wallet", "result", result);
           return textResult(result);
         }
@@ -1289,7 +1264,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (!res.ok) {
           const retry = await findWallet();
           if (retry) {
-            result.registration = { ok: true, walletId: retry.id, walletAddress: retry.wallet_address };
+            result.registration = { ok: true, walletAddress: retry.wallet_address };
             debugLog("setup_live_wallet", "result", result);
             return textResult(result);
           }
@@ -1298,7 +1273,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
         const created = await findWallet();
         if (!created) throw new Error("Wallet not found after registration");
-        result.registration = { ok: true, walletId: created.id, walletAddress: created.wallet_address };
+        result.registration = { ok: true, walletAddress: created.wallet_address };
       } catch (e: any) {
         result.registration = { ok: false, error: e.message };
       }
