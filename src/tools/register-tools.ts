@@ -628,6 +628,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       symbol: Type.Optional(Type.String({ description: 'Updated trader symbol, e.g. "ETH/USDC"' })),
       chainId: Type.Optional(Type.Number({ description: "Updated settlement/simulation chain ID" })),
       protocol: Type.Optional(Type.String({ description: 'Updated protocol, e.g. "hyperliquid" or "uniswap_v3"' })),
+      initialCapital: Type.Optional(Type.Number({ description: "Updated paper starting capital. Only allowed when switching to paper mode." })),
       buyLimit: Type.Optional(Type.Number({ description: "Updated live-trading buy limit in USD" })),
       walletAddress: Type.Optional(Type.String({ description: "Updated agent/API wallet address" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Updated master wallet address used by settlement" })),
@@ -655,6 +656,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         symbol?: string;
         chainId?: number;
         protocol?: string;
+        initialCapital?: number;
         buyLimit?: number;
         walletAddress?: string;
         masterWalletAddress?: string;
@@ -687,6 +689,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "symbol",
         "chainId",
         "protocol",
+        "initialCapital",
         "buyLimit",
         "walletAddress",
         "masterWalletAddress",
@@ -770,10 +773,42 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         : params.marketType === "spot"
           ? "spot"
           : currentMarketType;
+      const modeTransitionRequested = hasOwnField(params, "mode") && targetMode !== currentMode;
       try {
         ensureAmmSpotEnabled(targetMode, targetMarketType);
       } catch (e: any) {
         return textResult({ ...result, error: e.message });
+      }
+
+      if (hasOwnField(params, "initialCapital")) {
+        if (!modeTransitionRequested) {
+          return textResult({
+            ...result,
+            error: "initialCapital can only be updated when switching mode",
+          });
+        }
+        if (targetMode !== "paper") {
+          return textResult({
+            ...result,
+            error: "initialCapital can only be provided when switching to paper mode",
+          });
+        }
+        if (typeof params.initialCapital !== "number" || !Number.isFinite(params.initialCapital) || params.initialCapital <= 0) {
+          return textResult({
+            ...result,
+            error: "initialCapital must be a positive number",
+          });
+        }
+      }
+
+      if (targetMode === "paper") {
+        const invalidPaperFields = ["buyLimit", "walletAddress", "masterWalletAddress"].filter((field) => hasOwnField(params, field));
+        if (invalidPaperFields.length > 0) {
+          return textResult({
+            ...result,
+            error: `The following fields are live-only and must not be sent when mode is paper: ${invalidPaperFields.join(", ")}`,
+          });
+        }
       }
 
       if (params.chainId != null) {
@@ -859,9 +894,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // needsSettlementConfig = true if updating settlement-specific fields OR transitioning to live
       // chainId alone does NOT trigger settlement config (it's also used for paper simulation)
       const needsSettlementConfig =
-        settlementSpecificFields.some((field) => hasOwnField(params, field)) ||
-        (hasOwnField(params, "mode") && targetMode === "live") ||
-        (hasOwnField(params, "marketType") && targetMode === "live");
+        targetMode === "live" && (
+          settlementSpecificFields.some((field) => hasOwnField(params, field)) ||
+          hasOwnField(params, "mode") ||
+          hasOwnField(params, "marketType")
+        );
 
       const needsSimulationConfig =
         hasOwnField(params, "simulationConfig") ||
@@ -926,6 +963,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         marketType: targetMarketType,
         symbol: resolvedSymbol,
         chainId: resolvedChainId,
+        initialCapital: params.initialCapital ?? null,
         walletAddress: resolvedWalletAddress,
         masterWalletAddress: resolvedMasterWalletAddress,
         buyLimit: resolvedBuyLimit,
@@ -1028,10 +1066,12 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (hasOwnField(params, "marketType")) body.marketType = targetMarketType;
         if (hasOwnField(params, "symbol")) body.symbol = params.symbol;
         if (hasOwnField(params, "chainId")) body.chainId = params.chainId;
+        if (hasOwnField(params, "initialCapital")) body.initialCapital = params.initialCapital;
         if (hasOwnField(params, "walletAddress")) body.walletAddress = resolvedWalletAddress;
         if (hasOwnField(params, "buyLimit")) body.buyLimit = params.buyLimit;
         if (hasOwnField(params, "protocol")) body.protocol = params.protocol;
         if (settlementConfigPayload) body.settlement_config = settlementConfigPayload;
+        if (simulationConfigPayload) body.simulationConfig = simulationConfigPayload;
         if (!hasOwnField(params, "copiedFromAgentId") && hasOwnField(params, "isPrivate")) {
           body.isPrivate = params.isPrivate;
         }
@@ -1747,40 +1787,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         return textResult(result);
       }
 
-      // Step 2: Log action
-      try {
-        const timestamp = Math.floor(Date.now() / 1000);
-        const sigData = {
-          agent_id: agentId,
-          action: "create",
-          user: Nip19.npubEncode(publicKey),
-          timestamp,
-        };
-        const signature = Signer.getSignature(sigData, privateKey, {
-          agent_id: "number",
-          action: "string",
-          user: "string",
-          timestamp: "number",
-        } as const);
-
-        const logBody = { agentId, action: "create", signature, timestamp };
-        debugLog("deploy_agent", "log.api.req POST /agent-action-log", logBody);
-        const res = await fetch(`${baseUrl}/api/agent-action-log`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: auth,
-          },
-          body: JSON.stringify(logBody),
-        });
-        const logResBody = await res.json().catch(() => null);
-        debugLog("deploy_agent", "log.api.res", { status: res.status, body: logResBody });
-        result.log = { ok: res.ok };
-      } catch {
-        result.log = { ok: false };
-      }
-
-      // Step 3: Verify
+      // Step 2: Verify
       try {
         const res = await fetch(`${baseUrl}/api/agent/${agentId}`, {
           headers: { Authorization: auth },
