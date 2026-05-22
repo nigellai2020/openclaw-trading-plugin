@@ -1787,40 +1787,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         return textResult(result);
       }
 
-      // Step 2: Log action
-      try {
-        const timestamp = Math.floor(Date.now() / 1000);
-        const sigData = {
-          agent_id: agentId,
-          action: "create",
-          user: Nip19.npubEncode(publicKey),
-          timestamp,
-        };
-        const signature = Signer.getSignature(sigData, privateKey, {
-          agent_id: "number",
-          action: "string",
-          user: "string",
-          timestamp: "number",
-        } as const);
-
-        const logBody = { agentId, action: "create", signature, timestamp };
-        debugLog("deploy_agent", "log.api.req POST /agent-action-log", logBody);
-        const res = await fetch(`${baseUrl}/api/agent-action-log`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: auth,
-          },
-          body: JSON.stringify(logBody),
-        });
-        const logResBody = await res.json().catch(() => null);
-        debugLog("deploy_agent", "log.api.res", { status: res.status, body: logResBody });
-        result.log = { ok: res.ok };
-      } catch {
-        result.log = { ok: false };
-      }
-
-      // Step 3: Verify
+      // Step 2: Verify
       try {
         const res = await fetch(`${baseUrl}/api/agent/${agentId}`, {
           headers: { Authorization: auth },
