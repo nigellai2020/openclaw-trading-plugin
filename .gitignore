@@ -6,3 +6,4 @@ dist/
 *.d.ts
 !src/**/*.d.ts
 scripts/
+.master-wallet.local.json
