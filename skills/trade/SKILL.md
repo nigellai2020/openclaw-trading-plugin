@@ -11,6 +11,8 @@ Follow these steps to create a paper or live trading agent. This skill covers bo
 
 **No-fabrication rule (strict):** Do not invent, auto-fill, or infer values the user did not provide. Keep optional fields omitted. If a required field is missing or ambiguous, ask the user a direct follow-up question before calling tools.
 
+**No-improvisation rule (strict):** If the requested strategy pattern, operator, indicator output, or condition shape is not supported by the schema or documented in the `strategy-reference` skill, stop and tell the user it is not supported. Do not combine fields from different condition shapes, invent operator or field names, or substitute a "close enough" shape to make the request fit. Propose the closest supported alternative (e.g. the two-bar lookback pattern for "indicator crosses a numeric threshold") or ask the user how to proceed.
+
 For copy-agent requests, pass only what the user explicitly provided plus `copiedFromAgentId`. Do not fabricate `chainId`, `marketType`, `symbol`, `leverage`, `initialCapital`, or `isPrivate`.
 
 ## Step 1 — Ask trading mode and resolve market/network
