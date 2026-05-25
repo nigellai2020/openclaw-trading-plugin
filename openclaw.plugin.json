@@ -38,10 +38,6 @@
         "type": "string",
         "default": "https://agent02.decom.dev"
       },
-      "tradingBotUrl": {
-        "type": "string",
-        "default": "https://trading-agent.decom.dev"
-      },
       "nostrPrivateKey": {
         "type": "string"
       },

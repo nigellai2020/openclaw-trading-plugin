@@ -5,7 +5,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   DEFAULT_BASE_URL,
-  DEFAULT_BOT_URL,
   DEFAULT_ELIGIBLE_NFT_NAME,
   DEFAULT_FALLBACK_APPROVE_GAS,
   DEFAULT_FALLBACK_NFT_STAKE_GAS,
@@ -45,7 +44,6 @@ import {
 export function createToolsContext(api: any) {
   const pluginConfig = api.config?.plugins?.entries?.["trading-plugin"]?.config ?? api.config ?? {};
   const baseUrl: string = pluginConfig.baseUrl ?? DEFAULT_BASE_URL;
-  const tradingBotUrl: string = pluginConfig.tradingBotUrl ?? DEFAULT_BOT_URL;
   const walletAgentUrl: string = pluginConfig.walletAgentUrl ?? DEFAULT_WALLET_AGENT_URL;
   const settlementEngineUrl: string = pluginConfig.settlementEngineUrl ?? DEFAULT_SETTLEMENT_ENGINE_URL;
   const enableAmmSpot: boolean = pluginConfig.enableAmmSpot === true;
@@ -996,7 +994,6 @@ export function createToolsContext(api: any) {
   return {
     pluginConfig,
     baseUrl,
-    tradingBotUrl,
     walletAgentUrl,
     settlementEngineUrl,
     enableAmmSpot,

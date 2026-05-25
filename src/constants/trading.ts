@@ -1,5 +1,4 @@
 export const DEFAULT_BASE_URL = "https://agent02.decom.dev";
-export const DEFAULT_BOT_URL = "https://trading-agent.decom.dev";
 export const DEFAULT_WALLET_AGENT_URL = "https://wallet-agent.decom.dev";
 export const DEFAULT_SETTLEMENT_ENGINE_URL = "https://settlement-agent.decom.dev";
 export const DEFAULT_BSC_BILLING_RPC_URL = "https://data-seed-prebsc-1-s1.binance.org:8545";

@@ -50,7 +50,6 @@ config.gateway.controlUi.allowedOrigins = ['http://localhost:18789'];
 if (env.PLUGIN_NOSTR_PRIVATE_KEY) pc.nostrPrivateKey = env.PLUGIN_NOSTR_PRIVATE_KEY;
 if (env.PLUGIN_NOSTR_RELAY_URL) pc.nostrRelayUrl = env.PLUGIN_NOSTR_RELAY_URL;
 if (env.PLUGIN_BASE_URL) pc.baseUrl = env.PLUGIN_BASE_URL;
-if (env.PLUGIN_TRADING_BOT_URL) pc.tradingBotUrl = env.PLUGIN_TRADING_BOT_URL;
 if (env.PLUGIN_WALLET_AGENT_URL) pc.walletAgentUrl = env.PLUGIN_WALLET_AGENT_URL;
 if (env.PLUGIN_SETTLEMENT_ENGINE_URL) pc.settlementEngineUrl = env.PLUGIN_SETTLEMENT_ENGINE_URL;
 

@@ -174,7 +174,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
   const {
     pluginConfig,
     baseUrl,
-    tradingBotUrl,
     walletAgentUrl,
     settlementEngineUrl,
     enableAmmSpot,
