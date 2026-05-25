@@ -1,6 +1,35 @@
 {
   "id": "trading-plugin",
   "skills": ["./skills"],
+  "contracts": {
+    "tools": [
+      "get_token_prices",
+      "get_ohlc",
+      "get_supported_pairs",
+      "get_agent_trades",
+      "get_open_positions",
+      "get_nostr_identity",
+      "get_hyperliquid_balance",
+      "get_evm_wallet_balance",
+      "get_billing_subscriptions",
+      "get_agent",
+      "update_agent",
+      "init_trading_session",
+      "setup_live_wallet",
+      "prepare_agent_creation",
+      "deploy_agent",
+      "search_public_agents",
+      "list_my_agents",
+      "delete_agent",
+      "list_wallets",
+      "delete_wallet",
+      "create_backtest",
+      "get_backtests",
+      "get_backtest_job",
+      "get_backtest_result",
+      "backtest_leader_board"
+    ]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

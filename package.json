@@ -2,7 +2,9 @@
   "name": "trading-plugin",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "test:billing-flow": "node scripts/billing-flow-test.cjs"
   },
   "openclaw": {

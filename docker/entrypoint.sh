@@ -3,6 +3,9 @@ set -e
 
 cd /home/node/trading-plugin && rm -rf node_modules && npm install --include=dev
 
+# Compile TS to dist/ — newer OpenClaw images require compiled JS, not TS source
+npm run build
+
 # Clear stale sessions that have host-specific paths baked in
 rm -rf /home/node/.openclaw/agents/main/sessions
 
@@ -54,7 +57,9 @@ if (env.PLUGIN_SETTLEMENT_ENGINE_URL) pc.settlementEngineUrl = env.PLUGIN_SETTLE
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 "
 
-openclaw plugins install -l /home/node/trading-plugin
+# Plugin loads via plugins.load.paths (dev path, TS source allowed).
+# install is redundant and fails on newer images that require compiled output.
+openclaw plugins install -l /home/node/trading-plugin || true
 
 if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
   openclaw channels add --channel telegram --token "$TELEGRAM_BOT_TOKEN" || true
