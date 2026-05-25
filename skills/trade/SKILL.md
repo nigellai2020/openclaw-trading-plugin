@@ -72,7 +72,7 @@ Ask the user what trading strategy they want. Construct a strategy object with:
 - **rules**: entry (intent:"open") and exit (intent:"close") rules with conditions and order specs
 - **risk_manager**: stop_loss, take_profit, trailing_stop, cooldown, per_bar_limits
 
-For detailed schema references, see the `strategy-reference` skill.
+**You MUST load the `strategy-reference` skill before constructing any rule** that involves crossings (`crosses_above`/`crosses_below`), multi-value indicators (e.g. `macd.signal`, `bb.upper`, `linreg.slope`), discrete-value outputs (e.g. SuperTrend `.direction`, Parabolic SAR `.direction`), indicator-vs-numeric-threshold comparisons, lookback (`[n]`), or expression-based conditions. Skipping it leads to malformed rule shapes that the backend rejects with "data did not match any variant of untagged enum When".
 
 If the user says something general like "EMA crossover", ask a concise clarification question first (for example timeframe, entry/exit logic, and risk settings) before constructing the strategy.
 
