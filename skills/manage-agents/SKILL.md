@@ -18,9 +18,10 @@ If the user asks about billing subscriptions, renewal status, or next billing da
 2. Call `get_agent` if you need a quick public summary before confirming the change.
 3. Call `update_agent` with only the fields the user explicitly wants changed. Do not infer or auto-fill missing values.
 4. `chainId` can be set for both paper and live agents — it selects the network (Hyperliquid 998/999 or EVM chain ID).
-5. If the requested change touches live runtime fields (`walletAddress`, `masterWalletAddress`, `symbol`, `chainId`, `protocol`, `buyLimit`) and the tool reports missing companion fields, ask the user only for the missing companion fields before retrying.
-6. **Copied agents — switching source:** If the user wants to switch which source agent a copied agent follows, pass `copiedFromAgentId` to `update_agent`. Do not pass `isPrivate` together with `copiedFromAgentId` (copied agents are always private).
-7. Report the `tradingData` result. If the tool returns `warnings`, surface them verbatim.
+5. If the requested change touches live runtime fields (`walletAddress`, `masterWalletAddress`, `symbol`, `chainId`, `protocol`) and the tool reports missing companion fields, ask the user only for the missing companion fields before retrying.
+6. Do not ask the user for `buyLimit` on updates. Live sizing is derived server-side. Do not ask for `initialCapital` unless the user is explicitly switching the agent from live mode to paper mode.
+7. **Copied agents — switching source:** If the user wants to switch which source agent a copied agent follows, pass `copiedFromAgentId` to `update_agent`. Do not pass `isPrivate` together with `copiedFromAgentId` (copied agents are always private).
+8. Report the `tradingData` result. If the tool returns `warnings`, surface them verbatim.
 
 ## Delete an agent
 1. If the user hasn't specified an agent ID, call `list_my_agents` first and ask which one to delete.
