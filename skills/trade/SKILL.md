@@ -99,7 +99,8 @@ For live perp agents, ask the user for leverage if they did not provide it. Do n
 
 ## Step 6 — Determine initial capital
 - Paper mode: ask the user for `initialCapital`.
-- Live mode: `initialCapital` is optional because the API can derive it; only pass it when the user explicitly provides it.
+- Live mode: do not ask for or pass `initialCapital`. The server derives it from the live wallet balance.
+- If the user asks to set `initialCapital` for a live agent, explain that live-mode `initialCapital` is not accepted and is derived automatically from wallet context.
 - Do not assume or auto-fetch initial capital in the plugin.
 
 ## Step 7 — Run billing preflight
@@ -110,7 +111,7 @@ For live perp agents, ask the user for leverage if they did not provide it. Do n
 - Call `prepare_agent_creation` with:
   - Paper original: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
   - Live original: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
-  - Copy agent: `name`, `mode`, and `copiedFromAgentId` — do **not** pass `marketType`, `symbol`, `chainId`, `leverage`, `initialCapital`, or `isPrivate` unless the user explicitly requests an override
+  - Copy agent: `name`, `mode`, and `copiedFromAgentId` — do **not** pass `marketType`, `symbol`, `chainId`, `leverage`, `initialCapital`, or `isPrivate` unless the user explicitly requests an override that is valid for the chosen mode
 - If `prepare_agent_creation.billing.required = false`, say no upfront billing setup is required and skip to Step 8.
 - If `prepare_agent_creation.billing.required = true`, present the checkout page described below.
 - If `prepare_agent_creation` reports an `error`, STOP and explain it.
@@ -135,7 +136,7 @@ Please review your agent before funding your wallet.
 - *Mode:* {mode}
 - *Market:* {marketType}
 - *Symbol:* {symbol}
-- *Initial Capital:* ${initialCapital} {quote currency}
+- *Initial Capital:* {for paper: `${initialCapital} {quote currency}`; for live: `Derived from wallet balance at creation time`}
 - *Trading Market:* {trading network label in plain language} {add "(simulated)" for paper}
 
 ## Strategy
@@ -229,7 +230,7 @@ Render rules:
   - **If `fees.oswapShortfall = 0`**: The user already has enough OSWAP — show only the gas BNB needed. Say existing OSWAP covers the requirement. Do not show a swap option.
   - If `funding.bnbShortfall = 0`, say wallet is already funded and skip the "Fund your wallet" and "Funding details" sections. Go straight to asking for confirmation.
   - If `fees.requiredOswap = 0` and `funding.totalBnbNeeded = 0`, skip the funding sections entirely. Show a concise summary instead: existing eligible NFT, existing billing credit covers the first period, no upfront payment needed, remind about `subscription.renewalAmount` OSWAP by `subscription.estimatedEndTime` for auto renewal. Ask the user to confirm.
-  - Include "Initial Capital" whenever it is part of the confirmed request.
+  - Include "Initial Capital" whenever it is part of the confirmed request. For live agents, label it as server-derived rather than user-supplied.
   - Do not show raw chain IDs in user-facing summaries unless the user explicitly requests technical details.
 
 Ask the user to confirm or say "Done" after funding. Do NOT proceed until they explicitly confirm.
@@ -251,17 +252,17 @@ Call `deploy_agent` with:
 
 If required deploy inputs are missing, ask the user for the missing fields and wait. Do not guess.
 - Paper: `initialCapital`
-- Live: `walletAddress` and `masterWalletAddress`. Include `initialCapital` only if the user explicitly provides it.
-- Include `buyLimit` only when the user explicitly asks to set it.
+- Live: `walletAddress` and `masterWalletAddress`. Do not pass `initialCapital`; it is derived server-side.
 
 Copy-agent payload minimums:
 - Preferred minimal payload: `name`, `copiedFromAgentId`, optional `mode` if user specified.
-- Only include `marketType`, `symbol`, `chainId`, `leverage`, or `initialCapital` when the user explicitly asked to override source-agent defaults.
-- Only include `buyLimit` when the user explicitly asked to set it.
+- Only include `marketType`, `symbol`, `chainId`, or `leverage` when the user explicitly asked to override source-agent defaults.
+- Only include `initialCapital` when the user explicitly requested a paper-mode override.
 
 Important:
 - Do **not** pass `simulationConfig` — it is not in the API spec.
 - Do **not** pass `protocol` — not in the API spec.
+- Do **not** pass `buyLimit` — live sizing is derived server-side.
 - Do **not** omit `chainId` for crypto original-agent flows, even in paper mode.
 - For copy-agent flows, omit `chainId` unless the user explicitly asked for an override.
 

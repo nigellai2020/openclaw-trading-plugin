@@ -628,7 +628,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       chainId: Type.Optional(Type.Number({ description: "Updated settlement/simulation chain ID" })),
       protocol: Type.Optional(Type.String({ description: 'Updated protocol, e.g. "hyperliquid" or "uniswap_v3"' })),
       initialCapital: Type.Optional(Type.Number({ description: "Updated paper starting capital. Only allowed when switching to paper mode." })),
-      buyLimit: Type.Optional(Type.Number({ description: "Updated live-trading buy limit in USD" })),
       walletAddress: Type.Optional(Type.String({ description: "Updated agent/API wallet address" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Updated master wallet address used by settlement" })),
       simulationConfig: Type.Optional(SimulationConfigPatch),
@@ -656,7 +655,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         chainId?: number;
         protocol?: string;
         initialCapital?: number;
-        buyLimit?: number;
         walletAddress?: string;
         masterWalletAddress?: string;
         simulationConfig?: {
@@ -689,7 +687,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "chainId",
         "protocol",
         "initialCapital",
-        "buyLimit",
         "walletAddress",
         "masterWalletAddress",
         "simulationConfig",
@@ -801,7 +798,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       if (targetMode === "paper") {
-        const invalidPaperFields = ["buyLimit", "walletAddress", "masterWalletAddress"].filter((field) => hasOwnField(params, field));
+        const invalidPaperFields = ["walletAddress", "masterWalletAddress"].filter((field) => hasOwnField(params, field));
         if (invalidPaperFields.length > 0) {
           return textResult({
             ...result,
@@ -848,9 +845,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         requestedWalletRecord?.hyperliquid_network ??
         currentWalletRecord?.hyperliquid_network ??
         null;
-      const resolvedBuyLimit = hasOwnField(params, "buyLimit")
-        ? params.buyLimit ?? null
-        : currentSettings?.buyLimit ?? null;
       const resolvedLeverage = hasOwnField(params, "leverage")
         ? params.leverage ?? null
         : currentSettings?.leverage ?? null;
@@ -883,7 +877,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "masterWalletAddress",
         "symbol",
         "protocol",
-        "buyLimit",
       ];
       const settlementConfigFieldKeys = [
         ...settlementSpecificFields,
@@ -913,7 +906,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (!resolvedMasterWalletAddress) missing.push("masterWalletAddress");
         if (!resolvedSymbol) missing.push("symbol");
         if (resolvedChainId == null) missing.push("chainId");
-        if (resolvedBuyLimit == null) missing.push("buyLimit");
         if (missing.length > 0) {
           return textResult({
             ...result,
@@ -926,7 +918,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           agent_address: resolvedWalletAddress,
           symbol: resolvedSymbol,
           chain_id: resolvedChainId,
-          buy_limit_usd: resolvedBuyLimit,
         };
         if (resolvedProtocol) {
           settlementConfigPayload.protocol = resolvedProtocol;
@@ -953,7 +944,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         chainId: currentSettings?.chainId ?? null,
         walletAddress: currentWalletAddress,
         masterWalletAddress: currentMasterWalletAddress,
-        buyLimit: currentSettings?.buyLimit ?? null,
         leverage: currentSettings?.leverage ?? null,
         isActive: currentSettings?.isActive ?? null,
       };
@@ -965,7 +955,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         initialCapital: params.initialCapital ?? null,
         walletAddress: resolvedWalletAddress,
         masterWalletAddress: resolvedMasterWalletAddress,
-        buyLimit: resolvedBuyLimit,
         protocol: resolvedProtocol ?? null,
         leverage: resolvedLeverage,
       };
@@ -1067,7 +1056,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (hasOwnField(params, "chainId")) body.chainId = params.chainId;
         if (hasOwnField(params, "initialCapital")) body.initialCapital = params.initialCapital;
         if (hasOwnField(params, "walletAddress")) body.walletAddress = resolvedWalletAddress;
-        if (hasOwnField(params, "buyLimit")) body.buyLimit = params.buyLimit;
         if (hasOwnField(params, "protocol")) body.protocol = params.protocol;
         if (settlementConfigPayload) body.settlement_config = settlementConfigPayload;
         if (simulationConfigPayload) body.simulationConfig = simulationConfigPayload;
@@ -1446,7 +1434,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
       chainId: Type.Optional(Type.Number({ description: "Network chain ID for both paper and live modes (e.g. Hyperliquid: 998/999, EVM: 1/56). Optional for copy agents unless user explicitly requests override." })),
       leverage: Type.Optional(Type.Number({ description: "Leverage multiplier. Optional for copy agents unless user explicitly requests override." })),
-      buyLimit: Type.Optional(Type.Number({ description: "Live-trading buy limit in USD. Only include when the user explicitly requests it." })),
       isPrivate: Type.Optional(Type.Boolean({ description: 'When true, the agent is private and excluded from the public leaderboard. Defaults to false (public). Once an agent is public it cannot be made private again. Copy agents are always private.' })),
     }),
     async execute(
@@ -1465,7 +1452,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         symbol?: string;
         chainId?: number;
         leverage?: number;
-        buyLimit?: number;
         isPrivate?: boolean;
       },
     ) {
@@ -1487,6 +1473,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
       const mode = params.mode;
       const isLive = mode === "live";
+      if (isLive && hasOwnField(params, "initialCapital")) {
+        return textResult({ error: "initialCapital must not be provided for live mode; the server derives it from the wallet balance." });
+      }
       let marketType: "spot" | "perp" | undefined;
       let resolvedChainId: number | undefined = params.chainId;
       try {
@@ -1560,12 +1549,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       const leverage = params.leverage;
-
-      const buyLimit = params.buyLimit;
       const settlementConfig = isLive && params.masterWalletAddress && params.walletAddress
         ? { eth_address: params.masterWalletAddress, agent_address: params.walletAddress }
         : undefined;
-      debugLog("deploy_agent", "computed", { buyLimit, settlementConfig });
+      debugLog("deploy_agent", "computed", { settlementConfig });
 
       try {
         preparedContext = await prepareAgentCreationContext({
@@ -1749,7 +1736,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (initialCapital != null) payload.initialCapital = initialCapital;
         if (params.marketType != null) payload.marketType = marketType;
         if (leverage != null) payload.leverage = leverage;
-        if (buyLimit != null) payload.buyLimit = buyLimit;
         if (resolvedChainId != null) payload.chainId = resolvedChainId;
         if (params.assetType) payload.assetType = params.assetType;
         if (params.strategy) payload.strategy = params.strategy;
