@@ -63,6 +63,9 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | `get_agent`               | Get agent details by ID                                                     |
 | `update_agent`            | Update only the requested agent fields across the supported backends. Pass `copiedFromAgentId` to switch the source agent being followed |
 | `get_hyperliquid_balance` | Get USDC balance of a Hyperliquid master wallet                             |
+| `list_wallets`            | List all wallets registered to the current user                             |
+| `update_wallet`           | Update a wallet by address, including Hyperliquid metadata                  |
+| `delete_wallet`           | Delete a wallet by address                                                  |
 
 ### Backtesting
 
@@ -79,7 +82,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.j
 | -------------------- | ---------------------------------------- |
 | `trade`              | Guided workflow for creating new paper, live, or copy agents |
 | `manage-agents`      | Guided workflow for listing, updating, and deleting agents |
-| `manage-wallets`     | Guided workflow for listing and deleting wallets |
+| `manage-wallets`     | Guided workflow for listing, updating, and deleting wallets |
 | `market-data`        | Guided workflow for current token prices and historical market data |
 | `backtest`           | Guided workflow for running backtests    |
 | `strategy-reference` | Loads the canonical trading strategy reference from `skills/strategy-reference/strategy.md` |

@@ -2010,6 +2010,67 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
+  api.registerTool({
+    name: "update_wallet",
+    description: "Update a wallet by address. Supports renaming and Hyperliquid wallet metadata changes.",
+    parameters: Type.Object({
+      walletAddress: Type.String({ description: "Wallet address (0x...) to update" }),
+      name: Type.Optional(Type.String({ description: "Optional display name" })),
+      walletType: Type.Optional(Type.Union([
+        Type.Literal("regular"),
+        Type.Literal("hyperliquid_agent"),
+      ], { description: "Optional wallet type update" })),
+      masterWalletAddress: Type.Optional(Type.String({ description: "Required when updating a Hyperliquid agent wallet" })),
+      hyperliquidNetwork: Type.Optional(Type.Union([
+        Type.Literal("mainnet"),
+        Type.Literal("testnet"),
+      ], { description: "Required when updating a Hyperliquid agent wallet" })),
+    }),
+    async execute(_id: string, params: {
+      walletAddress: string;
+      name?: string;
+      walletType?: "regular" | "hyperliquid_agent";
+      masterWalletAddress?: string;
+      hyperliquidNetwork?: "mainnet" | "testnet";
+    }) {
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const npub = Nip19.npubEncode(publicKey);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const signedAt = Math.floor(Date.now() / 1000);
+      const result: Record<string, unknown> = {};
+      debugLog("update_wallet", "entry", params);
+
+      try {
+        const body = {
+          npub,
+          walletAddress: params.walletAddress,
+          ...(params.name !== undefined && { name: params.name }),
+          ...(params.walletType !== undefined && { walletType: params.walletType }),
+          ...(params.masterWalletAddress !== undefined && { masterWalletAddress: params.masterWalletAddress }),
+          ...(params.hyperliquidNetwork !== undefined && { hyperliquidNetwork: params.hyperliquidNetwork }),
+          walletAgentSignedAt: signedAt,
+        };
+        debugLog("update_wallet", "trading-data.req", body);
+        const res = await fetch(`${baseUrl}/api/wallets`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Authorization: auth },
+          body: JSON.stringify(body),
+        });
+        const resBody = await parseResponseBody(res);
+        debugLog("update_wallet", "trading-data.res", { status: res.status, body: resBody });
+        if (!res.ok) {
+          throw new Error(`update_wallet failed: ${res.status} ${responseErrorMessage(resBody)}`);
+        }
+        result.tradingData = { ok: true, body: resBody };
+      } catch (e: any) {
+        result.tradingData = { ok: false, error: e.message };
+      }
+
+      debugLog("update_wallet", "result", result);
+      return textResult(result);
+    },
+  });
+
   // ── Backtest tools ──────────────────────────────────────────────
 
   api.registerTool({

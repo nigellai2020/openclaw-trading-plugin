@@ -22,6 +22,7 @@
       "list_my_agents",
       "delete_agent",
       "list_wallets",
+      "update_wallet",
       "delete_wallet",
       "create_backtest",
       "get_backtests",
