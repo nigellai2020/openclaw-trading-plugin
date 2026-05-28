@@ -1286,23 +1286,27 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           headers: { "Content-Type": "application/json", Authorization: auth },
           body: JSON.stringify(registerBody),
         });
-        const resBody = await res.json().catch(() => null);
+        const resBody = await parseResponseBody(res);
         debugLog("setup_live_wallet", "api.res POST /api/wallets", { status: res.status, body: resBody });
         if (!res.ok) {
+          const backendError = responseErrorMessage(resBody);
           const retry = await findWallet();
           if (retry) {
             result.registration = { ok: true, walletAddress: retry.wallet_address };
             debugLog("setup_live_wallet", "result", result);
             return textResult(result);
           }
-          throw new Error(`register_wallet failed: ${res.status}`);
+          throw new Error(`register_wallet failed: ${res.status}${backendError ? ` ${backendError}` : ""}`);
         }
 
         const created = await findWallet();
         if (!created) throw new Error("Wallet not found after registration");
         result.registration = { ok: true, walletAddress: created.wallet_address };
       } catch (e: any) {
-        result.registration = { ok: false, error: e.message };
+        result.registration = {
+          ok: false,
+          error: e.message,
+        };
       }
 
       debugLog("setup_live_wallet", "result", result);

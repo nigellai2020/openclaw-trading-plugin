@@ -60,7 +60,9 @@ Call `setup_live_wallet` with `ethAgentPrivateKey`, `masterWalletAddress`, and `
 
 Handle the response:
 - **teeStorage.ok = false**: Report the error and STOP.
-- **registration.ok = false**: Report the error and STOP.
+- **registration.ok = false**: Report the exact backend error text and STOP.
+  - Do not infer causes from status codes (for example, do not say `422` "usually means already registered").
+  - Do not suggest deleting any wallet unless the backend message explicitly says the same wallet already exists.
 - Save `teeStorage.agentWalletAddress` and `registration.walletAddress`.
 
 ## Step 5 — Build strategy _(skip for copy agents)_
