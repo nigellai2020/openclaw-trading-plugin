@@ -322,28 +322,6 @@ export function createToolsContext(api: any) {
     return extractApiData(body);
   }
 
-  async function fetchSettlementProtocolName(
-    marketType: "spot" | "perp",
-    chainId: number,
-  ): Promise<string | undefined> {
-    const res = await fetch(`${settlementEngineUrl}/instruments/${marketType}`);
-    const body = await parseResponseBody(res);
-    if (!res.ok) {
-      throw new Error(`settlement instruments failed: ${res.status} ${responseErrorMessage(body)}`);
-    }
-
-    const instruments = Array.isArray(body?.instruments)
-      ? body.instruments
-      : Array.isArray(body?.data?.instruments)
-        ? body.data.instruments
-        : [];
-    const match = instruments.find((instrument: any) => Number(instrument?.chain_id) === chainId);
-    const protocolName = match?.protocol_name;
-    return typeof protocolName === "string" && protocolName.trim()
-      ? protocolName.trim()
-      : undefined;
-  }
-
   function buildBillingWallet(): Wallet {
     const privateKey = pluginConfig.nostrPrivateKey;
     if (!privateKey) {
@@ -1015,7 +993,6 @@ export function createToolsContext(api: any) {
     buildAgentActionSignature,
     buildWalletActionSignature,
     fetchPublicAgentProfile,
-    fetchSettlementProtocolName,
     buildBillingWallet,
     buildBillingHeaders,
     ensureBillingWalletRegistered,
