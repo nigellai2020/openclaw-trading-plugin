@@ -64,6 +64,9 @@ Handle the response:
   - Do not infer causes from status codes (for example, do not say `422` "usually means already registered").
   - Do not suggest deleting any wallet unless the backend message explicitly says the same wallet already exists.
 - Save `teeStorage.agentWalletAddress` and `registration.walletAddress`.
+- For agent deployment payloads, map wallet values into:
+  - `settlementConfig.ethAddress` = master wallet address
+  - `settlementConfig.agentAddress` = agent/API wallet address
 
 ## Step 5 — Build strategy _(skip for copy agents)_
 
@@ -254,7 +257,10 @@ Call `deploy_agent` with:
 
 If required deploy inputs are missing, ask the user for the missing fields and wait. Do not guess.
 - Paper: `initialCapital`
-- Live: `walletAddress` and `masterWalletAddress`. Do not pass `initialCapital`; it is derived server-side.
+- Live: pass `settlementConfig` with:
+  - `ethAddress` (master wallet, required)
+  - `agentAddress` (agent/API wallet, optional but recommended)
+  Do not pass `initialCapital`; it is derived server-side.
 
 Copy-agent payload minimums:
 - Preferred minimal payload: `name`, `copiedFromAgentId`, optional `mode` if user specified.
