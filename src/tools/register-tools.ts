@@ -20,7 +20,7 @@ import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
 import { sanitizeBacktestResultResponse, WEB_URL } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
-import { fetchEvmWalletBalances, fetchUsdcBalance, textResult } from "../utils/live-trading.js";
+import { fetchEvmWalletBalances, textResult } from "../utils/live-trading.js";
 import { fetchSupportedPairsFromApi } from "../utils/supported-pairs.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
@@ -195,7 +195,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     buildAgentActionSignature,
     buildWalletActionSignature,
     fetchPublicAgentProfile,
-    fetchSettlementProtocolName,
     buildBillingWallet,
     buildBillingHeaders,
     ensureBillingWalletRegistered,
@@ -484,33 +483,55 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "get_hyperliquid_balance",
-    description: "Get USDC balance of a Hyperliquid master wallet (public endpoint, no auth needed). Use the master wallet address, not the agent/API wallet.",
+    description: "Get Hyperliquid balance for the authenticated user by passing either a master wallet address or an agent wallet address. Defaults to USDC and resolves agent wallet to its master wallet automatically.",
     parameters: Type.Object({
-      masterWalletAddress: Type.String({ description: "Master wallet address (0x...), not the agent/API wallet" }),
+      walletAddress: Type.Optional(Type.String({ description: "Wallet address (0x...) that can be either master or agent" })),
+      masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (backward-compatible alias). Prefer walletAddress." })),
+      agentWalletAddress: Type.Optional(Type.String({ description: "Agent wallet address (backward-compatible alias). Prefer walletAddress." })),
       chainId: Type.Optional(Type.Number({ description: "998=testnet, 999=mainnet", default: 998 })),
+      coin: Type.Optional(Type.String({ description: "Coin symbol to query. Defaults to USDC." })),
     }),
     async execute(
       _id: string,
-      params: { masterWalletAddress: string; chainId?: number },
+      params: { walletAddress?: string; masterWalletAddress?: string; agentWalletAddress?: string; chainId?: number; coin?: string },
     ) {
-      const chainId = params.chainId ?? 998;
-      const balance = await fetchUsdcBalance(params.masterWalletAddress, chainId);
-
-      if (balance > 0) {
-        return textResult({ masterWalletAddress: params.masterWalletAddress, chainId, balance });
-      } else {
-        const appUrl = chainId === 999
-          ? "https://app.hyperliquid.xyz"
-          : "https://app.hyperliquid-testnet.xyz";
+      const requestedWalletAddress = params.walletAddress ?? params.masterWalletAddress ?? params.agentWalletAddress;
+      if (!requestedWalletAddress) {
         return textResult({
-          masterWalletAddress: params.masterWalletAddress,
-          chainId,
-          balance,
-          depositReminder:
-            `Your wallet has 0 USDC balance. You must deposit USDC into your Hyperliquid wallet before you can trade. ` +
-            `Deposit here: ${appUrl}`,
+          success: false,
+          error: "Provide one of walletAddress, masterWalletAddress, or agentWalletAddress.",
         });
       }
+
+      const chainId = params.chainId ?? 998;
+      const coin = params.coin?.trim();
+      const qs = new URLSearchParams({
+        walletAddress: requestedWalletAddress,
+        chainId: String(chainId),
+      });
+      if (coin) {
+        qs.set("coin", coin);
+      }
+
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const res = await fetch(`${baseUrl}/api/hyperliquid/balance?${qs.toString()}`, {
+        headers: { Authorization: auth },
+      });
+      const body = await parseResponseBody(res);
+
+      if (!res.ok) {
+        return textResult({
+          success: false,
+          error: responseErrorMessage(body),
+          status: res.status,
+          walletAddress: requestedWalletAddress,
+          chainId,
+          coin: coin?.toUpperCase() || "USDC",
+        });
+      }
+
+      return textResult(body);
     },
   });
 
