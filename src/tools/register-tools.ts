@@ -463,6 +463,43 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
+  api.registerTool({
+    name: "close_all_trades",
+    description: "Queue close-all for all open positions of one agent via POST /api/agent/:id/close-all-trades.",
+    parameters: Type.Object({
+      agentId: Type.Number({ description: "Agent ID" }),
+    }),
+    async execute(
+      _id: string,
+      params: {
+        agentId: number;
+      },
+    ) {
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+
+      const res = await fetch(`${baseUrl}/api/agent/${encodeURIComponent(String(params.agentId))}/close-all-trades`, {
+        method: "POST",
+        headers: {
+          Authorization: auth,
+          "Content-Type": "application/json",
+        },
+      });
+
+      const body = await parseResponseBody(res);
+      if (!res.ok) {
+        return textResult({
+          success: false,
+          status: res.status,
+          error: responseErrorMessage(body),
+          agentId: params.agentId,
+        });
+      }
+
+      return textResult(body);
+    },
+  });
+
   // ── Identity tools ─────────────────────────────────────
 
   api.registerTool({

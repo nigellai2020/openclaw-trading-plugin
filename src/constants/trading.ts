@@ -19,7 +19,6 @@ export const DEFAULT_FALLBACK_SWAP_GAS = 250_000n;
 export const DEFAULT_FALLBACK_APPROVE_GAS = 70_000n;
 export const DEFAULT_FALLBACK_NFT_STAKE_GAS = 300_000n;
 export const DEFAULT_FALLBACK_VAULT_DEPOSIT_GAS = 220_000n;
-export const DEFAULT_LIVE_LEVERAGE = 3;
 
 /** Chain IDs valid for spot (AMM/EVM) agents: Ethereum, BSC, BSC Testnet */
 export const SPOT_ALLOWED_CHAIN_IDS: readonly number[] = [1, 56, 97];
