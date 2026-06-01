@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { formatBacktestSummary } from "../src/utils/notifications.js";
+import { formatAgentDeactivationNotification, formatBacktestSummary } from "../src/utils/notifications.js";
 
 const TG_LIMIT = 4096;
 
@@ -86,4 +86,27 @@ test("formatBacktestSummary chunks across TG_LIMIT with many agents", () => {
 test("formatBacktestSummary returns empty array on missing agents", () => {
   assert.deepEqual(formatBacktestSummary({ scheduled_at: "2026-04-19" }), []);
   assert.deepEqual(formatBacktestSummary({ scheduled_at: "2026-04-19", agents: [] }), []);
+});
+
+test("formatAgentDeactivationNotification prefers explicit message", () => {
+  assert.equal(
+    formatAgentDeactivationNotification({
+      event: "agent_deactivated",
+      message: "Agent 42 has been deactivated after consecutive order failures.",
+    }),
+    "Agent 42 has been deactivated after consecutive order failures.",
+  );
+});
+
+test("formatAgentDeactivationNotification formats fallback payload", () => {
+  assert.equal(
+    formatAgentDeactivationNotification({
+      event: "agent_deactivated",
+      agent_id: 42,
+      agent_name: "Mean Reversion",
+      reason: "consecutive_order_failures",
+      source: "trading-bot",
+    }),
+    "[Agent Deactivated] Agent Mean Reversion (ID: 42) has been deactivated due to consecutive order failures. Source: trading-bot.",
+  );
 });
