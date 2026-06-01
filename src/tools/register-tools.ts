@@ -955,8 +955,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "chainId",  // For backwards compatibility in field list
       ];
 
-      // trading-data requires settlement_config for any update whose resulting mode is live.
-      const needsSettlementConfig = targetMode === "live";
+      // trading-data requires settlement_config only when entering live mode.
+      // If the caller supplies settlementConfig on an existing live agent, pass it
+      // through as an intentional wallet/config update.
+      const settlementConfigRequested = hasOwnField(params, "settlementConfig");
+      const needsSettlementConfig = (currentMode !== "live" && targetMode === "live") || settlementConfigRequested;
 
       const needsSimulationConfig =
         hasOwnField(params, "simulationConfig") ||
@@ -972,7 +975,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (missing.length > 0) {
           return textResult({
             ...result,
-            error: `Cannot update a live agent without settlement_config. Missing fields: ${missing.join(", ")}`,
+            error: `Cannot transition to live or update settlement_config. Missing fields: ${missing.join(", ")}`,
           });
         }
 
