@@ -374,14 +374,14 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "get_agent_trades",
-    description: "Get past trades and trade history for a single agent, with optional pagination, type, and either a relative range like 1d/7d or explicit start/end timestamps",
+    description: "Get past trades and trade history for a single agent. Each trade includes both entry and exit information in a single object, making it easy to understand the complete trade lifecycle. Returns trades with PnL calculations, fees, timestamps, and status (open/closed).",
     parameters: Type.Object({
       agentId: Type.Number({ description: "Agent ID" }),
       type: Type.Optional(Type.Union([
         Type.Literal("all"),
         Type.Literal("entry"),
         Type.Literal("exit"),
-      ], { description: 'Trade type filter: "all", "entry", or "exit"' })),
+      ], { description: 'Trade status filter: "all" (default), "entry" (open trades only), or "exit" (closed trades only)' })),
       range: Type.Optional(Type.Union([
         Type.Literal("12h"),
         Type.Literal("24h"),
@@ -427,7 +427,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       const { privateKey, publicKey } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
-      const url = `${baseUrl}/api/transactions/${params.agentId}${qs.toString() ? `?${qs}` : ""}`;
+      const url = `${baseUrl}/api/trades/${params.agentId}${qs.toString() ? `?${qs}` : ""}`;
       const res = await fetch(url, { headers: { Authorization: auth } });
       if (!res.ok) throw new Error(`get_agent_trades failed: ${res.status}`);
       return textResult(await res.json());
