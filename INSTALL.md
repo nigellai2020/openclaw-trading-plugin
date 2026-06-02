@@ -46,7 +46,7 @@ Replace the placeholders:
 - `${NOSTR_PRIVATE_KEY}` — your Nostr private key (hex)
 - `${NOSTR_RELAY_URL}` — optional Nostr relay URL (defaults to `wss://nos.lol`)
 
-The Nostr connection enables real-time trade fill notifications via Telegram. The plugin subscribes to NIP-04 kind-4 direct messages tagged to your derived Nostr public key and forwards only `fill_executed` events to your Telegram chat.
+The Nostr connection enables real-time trading notifications via Telegram. The plugin subscribes to NIP-04 kind-4 direct messages tagged to your derived Nostr public key and forwards supported events such as `fill_executed`, `backtest_completed`, and `agent_deactivated` to your Telegram chat.
 
 ## 4. Start the Gateway
 

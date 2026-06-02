@@ -94,6 +94,27 @@ export function formatFillNotification(event: any): string {
   return `[Trade Executed] Agent ${agentLabel}: ${action} ${sideLabel} ${base_amount} ${symbolLabel} @ $${execution_price}${pnlSuffix}`;
 }
 
+export function formatAgentDeactivationNotification(event: any): string {
+  if (typeof event?.message === "string" && event.message.trim()) {
+    return event.message.trim();
+  }
+
+  const agentId = event?.agent_id ?? event?.agentId;
+  const agentName = event?.agent_name ?? event?.agentName ?? "Unknown Agent";
+  const agentLabel = agentId != null
+    ? `${agentName} (ID: ${agentId})`
+    : agentName;
+  const rawReason = typeof event?.reason === "string" ? event.reason : "";
+  const reason = rawReason === "consecutive_order_failures"
+    ? "consecutive order failures"
+    : rawReason.replace(/_/g, " ") || "an incident";
+  const source = typeof event?.source === "string" && event.source.trim()
+    ? ` Source: ${event.source.trim()}.`
+    : "";
+
+  return `[Agent Deactivated] Agent ${agentLabel} has been deactivated due to ${reason}.${source}`;
+}
+
 function readOpenClawConfig(): { botToken: string | null; chatId: string | null } {
   const openclawDir = path.join(os.homedir(), ".openclaw");
   let botToken: string | null = null;

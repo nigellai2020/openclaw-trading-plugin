@@ -14,7 +14,7 @@ import {
   type ToolsContext,
 } from "../context/create-tools-context.js";
 import { SimulationConfig, SimulationConfigPatch, Strategy } from "../schemas/strategy.js";
-import { registerFillNotifications } from "./register-fill-notifications.js";
+import { registerNostrNotifications } from "./register-nostr-notifications.js";
 import type { EthHeaders, PreparedAgentCreationContext } from "../types/billing.js";
 import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
 import { sanitizeBacktestResultResponse, WEB_URL } from "../utils/backtest-result.js";
@@ -2434,6 +2434,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
-  // ── Fill execution notifications ─────────────────────────────────
-  registerFillNotifications(api, pluginConfig, debugLog);
+  // ── Nostr DM notifications ───────────────────────────────────────
+  registerNostrNotifications(api, pluginConfig, debugLog);
 }
