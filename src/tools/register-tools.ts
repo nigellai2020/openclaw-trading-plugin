@@ -401,7 +401,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         description: "End timestamp in Unix milliseconds or seconds. Ignored when range is provided.",
       })),
       page: Type.Optional(Type.Number({ description: "Page number" })),
-      pageSize: Type.Optional(Type.Number({ description: "Results per page" })),
+      pageSize: Type.Optional(Type.Number({ description: "Results per page (default: 100, max: 100)" })),
     }),
     async execute(
       _id: string,
