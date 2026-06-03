@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-An OpenClaw plugin for trading data, paper/live trading (Hyperliquid), copy-trading, and backtesting. Registers 23 tools and 7 skills. Uses Nostr cryptography for auth and communicates with 5 backend services.
+An OpenClaw plugin for trading data, paper/live trading (Hyperliquid), copy-trading, and backtesting. Registers 27 tools and 7 skills. Uses Nostr cryptography for auth and communicates with 5 backend services.
 
 ## Commands
 

@@ -8,6 +8,7 @@
       "get_supported_pairs",
       "get_agent_trades",
       "get_open_positions",
+      "close_all_trades",
       "get_nostr_identity",
       "get_hyperliquid_balance",
       "get_evm_wallet_balance",
