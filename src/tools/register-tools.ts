@@ -1,5 +1,5 @@
 import { Type } from "@sinclair/typebox";
-import { Crypto, Keys, Nip19, Signer } from "@scom/scom-signer";
+import { Crypto, Keys, Nip19 } from "@scom/scom-signer";
 import { Contract, Wallet } from "ethers";
 import {
   ERC20_ABI,
@@ -192,8 +192,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     parseResponseBody,
     fetchAgentSettingsForUpdate,
     fetchWalletsForUpdate,
-    buildAgentActionSignature,
-    buildWalletActionSignature,
     fetchPublicAgentProfile,
     buildBillingWallet,
     buildBillingHeaders,
@@ -686,6 +684,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       chainId: Type.Optional(Type.Number({ description: "Updated settlement/simulation chain ID" })),
       protocol: Type.Optional(Type.String({ description: 'Updated protocol, e.g. "hyperliquid" or "uniswap_v3"' })),
       initialCapital: Type.Optional(Type.Number({ description: "Updated paper starting capital. Only allowed when switching to paper mode." })),
+      walletAddress: Type.Optional(Type.String({ description: "Live wallet selector mapped to wallet_address. Can be a master wallet or agent wallet address in oswap_wallets." })),
       settlementConfig: Type.Optional(Type.Object({
         ethAddress: Type.String({ description: "Master wallet address used by settlement (maps to settlement_config.eth_address)" }),
         agentAddress: Type.Optional(Type.String({ description: "Agent/API wallet address (maps to settlement_config.agent_address). If omitted, backend falls back to ethAddress." })),
@@ -715,6 +714,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         chainId?: number;
         protocol?: string;
         initialCapital?: number;
+        walletAddress?: string;
         settlementConfig?: {
           ethAddress: string;
           agentAddress?: string;
@@ -749,6 +749,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "chainId",
         "protocol",
         "initialCapital",
+        "walletAddress",
         "settlementConfig",
         "simulationConfig",
         "positionQty",
@@ -777,6 +778,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       if (hasOwnField(params, "copiedFromAgentId") && hasOwnField(params, "isPrivate")) {
         return textResult({
           error: "Do not send isPrivate together with copiedFromAgentId. Copied agents are always private; ask the user only for the source agent ID.",
+        });
+      }
+      if (hasOwnField(params, "walletAddress") && hasOwnField(params, "settlementConfig")) {
+        return textResult({
+          error: "Provide either walletAddress or settlementConfig for live wallet selection, not both.",
         });
       }
 
@@ -859,7 +865,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       if (targetMode === "paper") {
-        const invalidPaperFields = ["settlementConfig"].filter((field) => hasOwnField(params, field));
+        const invalidPaperFields = ["settlementConfig", "walletAddress"].filter((field) => hasOwnField(params, field));
         if (invalidPaperFields.length > 0) {
           return textResult({
             ...result,
@@ -876,11 +882,22 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const currentWalletRecord = resolveWalletRecord(wallets, {
         walletAddress: currentSettings?.walletAddress,
       });
+      const requestedWalletAddress = params.walletAddress;
       const requestedSettlementAgentAddress = params.settlementConfig?.agentAddress;
       const requestedSettlementMasterWalletAddress = params.settlementConfig?.ethAddress;
       const requestedWalletRecord = resolveWalletRecord(wallets, {
-        walletAddress: requestedSettlementAgentAddress,
+        walletAddress: requestedWalletAddress ?? requestedSettlementAgentAddress,
       });
+      if (
+        hasOwnField(params, "walletAddress") &&
+        requestedWalletAddress != null &&
+        !requestedWalletRecord
+      ) {
+        return textResult({
+          ...result,
+          error: `walletAddress ${requestedWalletAddress} was not found in the current wallet list`,
+        });
+      }
       if (
         hasOwnField(params, "settlementConfig") &&
         requestedSettlementAgentAddress != null &&
@@ -904,6 +921,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const resolvedSymbol = params.symbol ?? inferSymbolFromStrategy(nextStrategy) ?? currentSymbol ?? null;
       const resolvedChainId = hasOwnField(params, "chainId") ? params.chainId ?? null : currentSettings?.chainId ?? null;
       const resolvedWalletAddress =
+        requestedWalletAddress ??
         requestedSettlementAgentAddress ??
         requestedWalletRecord?.wallet_address ??
         currentSettings?.walletAddress ??
@@ -947,6 +965,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // Settlement-specific fields (excluding chainId which is needed for both paper and live)
       const settlementSpecificFields = [
         "settlementConfig",
+        "walletAddress",
         "symbol",
         "protocol",
       ];
@@ -959,6 +978,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // If the caller supplies settlementConfig on an existing live agent, pass it
       // through as an intentional wallet/config update.
       const settlementConfigRequested = hasOwnField(params, "settlementConfig");
+      const walletAddressRequested = hasOwnField(params, "walletAddress");
       const needsSettlementConfig = (currentMode !== "live" && targetMode === "live") || settlementConfigRequested;
 
       const needsSimulationConfig =
@@ -969,7 +989,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
               hasOwnField(params, "protocol"))));
 
       let settlementConfigPayload: Record<string, unknown> | undefined;
-      if (needsSettlementConfig) {
+      if (needsSettlementConfig && !walletAddressRequested) {
         const missing: string[] = [];
         if (!resolvedMasterWalletAddress) missing.push("settlementConfig.ethAddress");
         if (missing.length > 0) {
@@ -1090,25 +1110,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           }
         }
 
-        const logSignature = Signer.getSignature(
-          {
-            agent_id: params.agentId,
-            action: "update",
-            user: npub,
-            timestamp: signedAt,
-          },
-          privateKey,
-          {
-            agent_id: "number",
-            action: "string",
-            user: "string",
-            timestamp: "number",
-          } as const,
-        );
-
         const body: Record<string, unknown> = {
           id: params.agentId,
-          signature: logSignature,
           timestamp: signedAt,
         };
         if (hasOwnField(params, "name")) body.name = params.name;
@@ -1125,6 +1128,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (hasOwnField(params, "chainId")) body.chainId = params.chainId;
         if (hasOwnField(params, "initialCapital")) body.initialCapital = params.initialCapital;
         if (hasOwnField(params, "protocol")) body.protocol = params.protocol;
+        if (hasOwnField(params, "walletAddress")) body.wallet_address = params.walletAddress;
         if (settlementConfigPayload) body.settlement_config = settlementConfigPayload;
         if (simulationConfigPayload) body.simulationConfig = simulationConfigPayload;
         if (!hasOwnField(params, "copiedFromAgentId") && hasOwnField(params, "isPrivate")) {
@@ -1319,27 +1323,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         }
 
         const createdAt = Math.floor(Date.now() / 1000);
-        const walletSig = Signer.getSignature(
-          {
-            created_at: createdAt,
-            wallet_address: agentWalletAddress,
-            action: "connected",
-            npub,
-          },
-          privateKey,
-          {
-            created_at: "number",
-            wallet_address: "string",
-            action: "string",
-            npub: "string",
-          } as const,
-        );
 
         const registerBody = {
           npub,
           name: `Wallet-${createdAt}`,
           walletAddress: agentWalletAddress,
-          signature: walletSig,
           createdAt,
           walletType: "hyperliquid_agent",
           masterWalletAddress: params.masterWalletAddress,
@@ -1501,6 +1489,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       strategyDescription: Type.Optional(Type.String({ description: "Human-readable strategy summary" })),
       copiedFromAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Required when strategy is omitted. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
       assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation.' })),
+      walletAddress: Type.Optional(Type.String({ description: "Live wallet selector mapped to wallet_address. Can be a master wallet or agent wallet address in oswap_wallets." })),
       settlementConfig: Type.Optional(Type.Object({
         ethAddress: Type.String({ description: "Master wallet address (maps to settlement_config.eth_address). Required in live mode." }),
         agentAddress: Type.Optional(Type.String({ description: "Agent/API wallet address (maps to settlement_config.agent_address). Optional; backend falls back to ethAddress." })),
@@ -1521,6 +1510,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         strategyDescription?: string;
         copiedFromAgentId?: number;
         assetType?: string;
+        walletAddress?: string;
         settlementConfig?: {
           ethAddress: string;
           agentAddress?: string;
@@ -1549,6 +1539,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
       const mode = params.mode;
       const isLive = mode === "live";
+      if (hasOwnField(params, "walletAddress") && hasOwnField(params, "settlementConfig")) {
+        return textResult({ error: "Provide either walletAddress or settlementConfig for live wallet selection, not both." });
+      }
       if (isLive && hasOwnField(params, "initialCapital")) {
         return textResult({ error: "initialCapital must not be provided for live mode; the server derives it from the wallet balance." });
       }
@@ -1569,11 +1562,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         }
         if (params.marketType != null) marketType = resolveMarketType(mode, params.marketType);
 
-        if (isLive && marketType === "perp" && resolvedChainId == null && params.settlementConfig?.agentAddress) {
+        if (isLive && marketType === "perp" && resolvedChainId == null && (params.walletAddress || params.settlementConfig?.agentAddress)) {
           try {
             const wallets = await fetchWalletsForUpdate(auth);
             const walletRecord = resolveWalletRecord(wallets, {
-              walletAddress: params.settlementConfig.agentAddress,
+              walletAddress: params.walletAddress ?? params.settlementConfig?.agentAddress,
             });
             if (walletRecord?.hyperliquid_network === "testnet") {
               resolvedChainId = 998;
@@ -1601,10 +1594,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           const chainErr = validateChainIdForMarketType(resolvedChainId, marketType);
           if (chainErr) return textResult({ error: chainErr });
         }
-        if (isLive) {
-          if (!params.settlementConfig?.ethAddress) {
-            return textResult({ error: "settlementConfig.ethAddress is required for live mode" });
-          }
+        if (isLive && !params.walletAddress && !params.settlementConfig?.ethAddress) {
+          return textResult({ error: "walletAddress or settlementConfig.ethAddress is required for live mode" });
         }
       } catch (e: any) {
         return textResult({ error: e.message });
@@ -1622,13 +1613,14 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       const leverage = params.leverage;
+      const walletAddress = params.walletAddress;
       const settlementConfig = isLive && params.settlementConfig?.ethAddress
         ? {
             eth_address: params.settlementConfig.ethAddress,
             ...(params.settlementConfig.agentAddress ? { agent_address: params.settlementConfig.agentAddress } : {}),
           }
         : undefined;
-      debugLog("deploy_agent", "computed", { settlementConfig });
+      debugLog("deploy_agent", "computed", { walletAddress, settlementConfig });
 
       try {
         preparedContext = await prepareAgentCreationContext({
@@ -1818,7 +1810,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (params.strategyDescription) payload.strategyDescription = params.strategyDescription;
         if (params.copiedFromAgentId != null) payload.copiedFromAgentId = params.copiedFromAgentId;
         if (params.symbol) payload.symbol = params.symbol;
-        if (settlementConfig) payload.settlement_config = settlementConfig;
+        if (walletAddress) payload.wallet_address = walletAddress;
+        else if (settlementConfig) payload.settlement_config = settlementConfig;
         if (!isCopyAgent && hasOwnField(params, "isPrivate")) payload.isPrivate = params.isPrivate;
 
         debugLog("deploy_agent", "create.api.req POST /api/agent", payload);
@@ -2008,10 +2001,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       // Step 1: Delete from trading-data (delegates to trading-bot and settlement engine)
       try {
-        const sigData = { agent_id: params.agentId, action: "delete", user: npub, timestamp: signedAt };
-        const signature = Signer.getSignature(sigData, privateKey, {
-          agent_id: "number", action: "string", user: "string", timestamp: "number",
-        } as const);
         const billingHeaders = await buildBillingHeaders(billingWallet);
         const res = await fetch(`${baseUrl}/api/agent/${params.agentId}`, {
           method: "DELETE",
@@ -2020,7 +2009,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             Authorization: auth,
             ...billingHeaders,
           },
-          body: JSON.stringify({ signature, timestamp: signedAt }),
+          body: JSON.stringify({ timestamp: signedAt }),
         });
         debugLog("delete_agent", "trading-data.res", { status: res.status });
         result.tradingData = { ok: res.ok };
@@ -2065,14 +2054,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // Remove from trading-data (server always also removes from TEE)
       try {
         const createdAt = signedAt;
-        const sigData = { created_at: createdAt, wallet_address: params.walletAddress, action: "disconnected", npub };
-        const signature = Signer.getSignature(sigData, privateKey, {
-          created_at: "number", wallet_address: "string", action: "string", npub: "string",
-        } as const);
         const res = await fetch(`${baseUrl}/api/wallets`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json", Authorization: auth },
-          body: JSON.stringify({ npub, walletAddress: params.walletAddress, signature, createdAt, agents: [], walletAgentSignedAt: signedAt }),
+          body: JSON.stringify({ npub, walletAddress: params.walletAddress, createdAt, agents: [], walletAgentSignedAt: signedAt }),
         });
         debugLog("delete_wallet", "trading-data.res", { status: res.status });
         result.tradingData = { ok: res.ok };

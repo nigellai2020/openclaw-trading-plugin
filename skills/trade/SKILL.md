@@ -65,6 +65,7 @@ Handle the response:
   - Do not suggest deleting any wallet unless the backend message explicitly says the same wallet already exists.
 - Save `teeStorage.agentWalletAddress` and `registration.walletAddress`.
 - For agent deployment payloads, map wallet values into:
+  - `walletAddress` = agent/API wallet address (preferred single live wallet selector)
   - `settlementConfig.ethAddress` = master wallet address
   - `settlementConfig.agentAddress` = agent/API wallet address
 
@@ -258,8 +259,11 @@ Call `deploy_agent` with:
 If required deploy inputs are missing, ask the user for the missing fields and wait. Do not guess.
 - Paper: `initialCapital`
 - Live: pass `settlementConfig` with:
+  - Prefer `walletAddress` when the user gives a single live wallet address (master or agent wallet registered in oswap_wallets).
+  - Or pass `settlementConfig` with:
   - `ethAddress` (master wallet, required)
   - `agentAddress` (agent/API wallet, optional but recommended)
+  - Never pass both `walletAddress` and `settlementConfig` in the same request.
   Do not pass `initialCapital`; it is derived server-side.
 
 Copy-agent payload minimums:
