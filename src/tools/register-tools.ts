@@ -1,5 +1,5 @@
 import { Type } from "@sinclair/typebox";
-import { Crypto, Keys, Nip19, Signer } from "@scom/scom-signer";
+import { Crypto, Keys, Nip19 } from "@scom/scom-signer";
 import { Contract, Wallet } from "ethers";
 import {
   ERC20_ABI,
@@ -192,8 +192,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     parseResponseBody,
     fetchAgentSettingsForUpdate,
     fetchWalletsForUpdate,
-    buildAgentActionSignature,
-    buildWalletActionSignature,
     fetchPublicAgentProfile,
     buildBillingWallet,
     buildBillingHeaders,
@@ -1112,25 +1110,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           }
         }
 
-        const logSignature = Signer.getSignature(
-          {
-            agent_id: params.agentId,
-            action: "update",
-            user: npub,
-            timestamp: signedAt,
-          },
-          privateKey,
-          {
-            agent_id: "number",
-            action: "string",
-            user: "string",
-            timestamp: "number",
-          } as const,
-        );
-
         const body: Record<string, unknown> = {
           id: params.agentId,
-          signature: logSignature,
           timestamp: signedAt,
         };
         if (hasOwnField(params, "name")) body.name = params.name;
@@ -1342,27 +1323,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         }
 
         const createdAt = Math.floor(Date.now() / 1000);
-        const walletSig = Signer.getSignature(
-          {
-            created_at: createdAt,
-            wallet_address: agentWalletAddress,
-            action: "connected",
-            npub,
-          },
-          privateKey,
-          {
-            created_at: "number",
-            wallet_address: "string",
-            action: "string",
-            npub: "string",
-          } as const,
-        );
 
         const registerBody = {
           npub,
           name: `Wallet-${createdAt}`,
           walletAddress: agentWalletAddress,
-          signature: walletSig,
           createdAt,
           walletType: "hyperliquid_agent",
           masterWalletAddress: params.masterWalletAddress,
@@ -2036,10 +2001,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       // Step 1: Delete from trading-data (delegates to trading-bot and settlement engine)
       try {
-        const sigData = { agent_id: params.agentId, action: "delete", user: npub, timestamp: signedAt };
-        const signature = Signer.getSignature(sigData, privateKey, {
-          agent_id: "number", action: "string", user: "string", timestamp: "number",
-        } as const);
         const billingHeaders = await buildBillingHeaders(billingWallet);
         const res = await fetch(`${baseUrl}/api/agent/${params.agentId}`, {
           method: "DELETE",
@@ -2048,7 +2009,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             Authorization: auth,
             ...billingHeaders,
           },
-          body: JSON.stringify({ signature, timestamp: signedAt }),
+          body: JSON.stringify({ timestamp: signedAt }),
         });
         debugLog("delete_agent", "trading-data.res", { status: res.status });
         result.tradingData = { ok: res.ok };
@@ -2093,14 +2054,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // Remove from trading-data (server always also removes from TEE)
       try {
         const createdAt = signedAt;
-        const sigData = { created_at: createdAt, wallet_address: params.walletAddress, action: "disconnected", npub };
-        const signature = Signer.getSignature(sigData, privateKey, {
-          created_at: "number", wallet_address: "string", action: "string", npub: "string",
-        } as const);
         const res = await fetch(`${baseUrl}/api/wallets`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json", Authorization: auth },
-          body: JSON.stringify({ npub, walletAddress: params.walletAddress, signature, createdAt, agents: [], walletAgentSignedAt: signedAt }),
+          body: JSON.stringify({ npub, walletAddress: params.walletAddress, createdAt, agents: [], walletAgentSignedAt: signedAt }),
         });
         debugLog("delete_wallet", "trading-data.res", { status: res.status });
         result.tradingData = { ok: res.ok };
