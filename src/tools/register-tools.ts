@@ -5,7 +5,9 @@ import {
   ERC20_ABI,
   getEvmChainConfig,
   NFT_ABI,
+  PERP_ALLOWED_CHAIN_IDS,
   ROUTER_ABI,
+  SPOT_ALLOWED_CHAIN_IDS,
   VAULT_ABI,
   validateChainIdForMarketType,
 } from "../constants/trading.js";
@@ -1581,7 +1583,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         // missing chain fails fast instead of after billing side effects. Copy
         // agents are exempt — trading-data resolves the chain from the source agent.
         if (!isCopyAgent && resolvedChainId == null) {
-          return textResult({ error: "chainId is required: 1 (Ethereum) or 56 (BNB Chain) for spot, 998 (Hyperliquid testnet) or 999 (Hyperliquid mainnet) for perp." });
+          return textResult({ error: `chainId is required: ${SPOT_ALLOWED_CHAIN_IDS.join(", ")} for spot, ${PERP_ALLOWED_CHAIN_IDS.join(", ")} for perp.` });
         }
         if (isLive && !params.walletAddress && !params.settlementConfig?.ethAddress) {
           return textResult({ error: "walletAddress or settlementConfig.ethAddress is required for live mode" });
