@@ -2,7 +2,7 @@
 
 Complete guide to creating trading strategy JSON files for the Trading Rule Engine.
 
-> Canonical OpenClaw strategy reference. The `strategy-reference` skill should load this file before answering strategy-schema questions or generating strategy JSON.
+> Canonical OpenClaw strategy reference. The `strategy-reference` skill should read this file in the current session before answering strategy-schema questions or generating strategy JSON. Do not spawn a subagent just to retrieve this reference.
 >
 > If this document and `src/schemas/strategy.ts` ever diverge, emit JSON that stays compatible with `src/schemas/strategy.ts` and the registered tool parameter schemas.
 

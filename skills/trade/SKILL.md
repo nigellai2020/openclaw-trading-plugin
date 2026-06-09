@@ -9,6 +9,8 @@ Follow these steps to create a paper or live trading agent. This skill covers bo
 
 **Copy-agent path:** If the user wants to copy, follow, or duplicate an existing agent, that is handled by this same skill. When in copy mode, Steps 1–4 are the same, Step 5 (Build strategy) is **skipped**, and the `copiedFromAgentId` is passed to `prepare_agent_creation` and `deploy_agent` instead of a strategy object.
 
+**Session constraint (strict):** All plugin tool calls in this workflow (`init_trading_session`, `setup_live_wallet`, `search_public_agents`, `prepare_agent_creation`, `deploy_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
+
 **No-fabrication rule (strict):** Do not invent, auto-fill, or infer values the user did not provide. Keep optional fields omitted. If a required field is missing or ambiguous, ask the user a direct follow-up question before calling tools.
 
 **No-improvisation rule (strict):** If the requested strategy pattern, operator, indicator output, or condition shape is not supported by the schema or documented in the `strategy-reference` skill, stop and tell the user it is not supported. Do not combine fields from different condition shapes, invent operator or field names, or substitute a "close enough" shape to make the request fit. Propose the closest supported alternative (e.g. the two-bar lookback pattern for "indicator crosses a numeric threshold") or ask the user how to proceed.
@@ -53,7 +55,14 @@ Ask the user if they already have a Hyperliquid API wallet private key.
   5. **Copy the private key immediately** (shown only once)
   6. Set validity to MAX (180 days), click **Authorize**, sign the message
 
-Then ask for: (1) the API wallet private key, (2) their master wallet address (0x...).
+Then ask for:
+1. the API wallet private key
+2. their master wallet address (0x...)
+
+Clarify the distinction explicitly:
+- The API wallet private key should resolve to the API/agent wallet address created in Hyperliquid's API page.
+- The master wallet address is the main wallet that authorized that API wallet.
+- These must be different addresses. If the user gives the same address for both, stop and ask them to re-check which one is their master wallet.
 
 ## Step 4 (live only) — Store and register wallet
 Call `setup_live_wallet` with `ethAgentPrivateKey`, `masterWalletAddress`, and `network`.
@@ -71,7 +80,7 @@ Handle the response:
 
 ## Step 5 — Build strategy _(skip for copy agents)_
 
-**Copy-agent path:** If the user is copying an existing agent, skip this entire step. Ask for the source agent ID (or search by name using `search_public_agents` if needed). Record it as `copiedFromAgentId`.
+**Copy-agent path:** If the user is copying an existing agent, skip this entire step. Ask for the source agent ID. If the user only knows the agent name, call `search_public_agents` directly from this session, present the matches, and keep the rest of the workflow in this same session. Record the chosen source as `copiedFromAgentId`.
 
 **Original-agent path:** Ask the user for an agent name if they have not already provided one.
 
@@ -80,7 +89,7 @@ Ask the user what trading strategy they want. Construct a strategy object with:
 - **rules**: entry (intent:"open") and exit (intent:"close") rules with conditions and order specs
 - **risk_manager**: stop_loss, take_profit, trailing_stop, cooldown, per_bar_limits
 
-**You MUST load the `strategy-reference` skill before constructing any rule** that involves crossings (`crosses_above`/`crosses_below`), multi-value indicators (e.g. `macd.signal`, `bb.upper`, `linreg.slope`), discrete-value outputs (e.g. SuperTrend `.direction`, Parabolic SAR `.direction`), indicator-vs-numeric-threshold comparisons, lookback (`[n]`), or expression-based conditions. Skipping it leads to malformed rule shapes that the backend rejects with "data did not match any variant of untagged enum When".
+**You MUST consult the `strategy-reference` skill content in the current session context before constructing any rule** that involves crossings (`crosses_above`/`crosses_below`), multi-value indicators (e.g. `macd.signal`, `bb.upper`, `linreg.slope`), discrete-value outputs (e.g. SuperTrend `.direction`, Parabolic SAR `.direction`), indicator-vs-numeric-threshold comparisons, lookback (`[n]`), or expression-based conditions. Do NOT spawn a subagent or delegate plugin tool calls to retrieve that reference. If the reference content is unavailable, stop and report that the strategy reference context is missing. Skipping it leads to malformed rule shapes that the backend rejects with "data did not match any variant of untagged enum When".
 
 If the user says something general like "EMA crossover", ask a concise clarification question first (for example timeframe, entry/exit logic, and risk settings) before constructing the strategy.
 
@@ -114,6 +123,7 @@ For live perp agents, ask the user for leverage if they did not provide it. Do n
 - Explain that `prepare_agent_creation` automatically registers the derived billing wallet through `POST /api/auth/login` before billing checks.
 - Explain that the plugin loads all active NFT configs from `/api/nft-config` and only uses the cheapest eligible NFT when a new mint is required.
 - `prepare_agent_creation` is a **read-only preflight**. It does **not** authorize deployment. After calling it, your next message must present the summary and ask for confirmation. Do **not** call `deploy_agent` in the same turn as the preflight.
+- Call `prepare_agent_creation` directly from this session as a tool call. Do NOT delegate this step to a subagent or workaround via `exec` or direct HTTP requests. If the tool is unavailable, stop immediately and report a plugin or configuration problem.
 - Call `prepare_agent_creation` with:
   - Paper original: `name`, `mode: "paper"`, chosen `marketType`, and `symbol`
   - Live original: `name`, `mode: "live"`, chosen `marketType`, and `symbol`
@@ -248,6 +258,8 @@ Confirmation rules:
   - If `deploy_agent` was called too early and returns a funding shortfall, explain the breakdown, acknowledge that deployment should have waited for confirmation, and return to the confirmation step instead of behaving as if the user had already approved.
 
 ## Step 9 — Deploy agent
+Call `deploy_agent` directly from this session as a tool call. Do NOT delegate this step to a subagent or workaround via `exec` or direct HTTP requests. If the tool is unavailable, stop immediately and report a plugin or configuration problem.
+
 Call `deploy_agent` with:
 - `name`, `mode`, `marketType`
 - `assetType`: always pass `"crypto"` or `"stocks"`

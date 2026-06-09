@@ -5,6 +5,8 @@ description: List, update, or delete trading agents. Use when the user wants to 
 
 # Manage Trading Agents
 
+**Session constraint (strict):** All plugin tool calls in this workflow (`list_my_agents`, `get_billing_subscriptions`, `get_agent`, `update_agent`, `delete_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
+
 ## List agents
 Call `list_my_agents`. Optional filters: `mode` ("live"/"paper"), `marketType` ("spot"/"perp"), `page`, `pageSize`.
 
