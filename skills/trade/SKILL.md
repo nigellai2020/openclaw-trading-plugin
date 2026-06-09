@@ -55,7 +55,14 @@ Ask the user if they already have a Hyperliquid API wallet private key.
   5. **Copy the private key immediately** (shown only once)
   6. Set validity to MAX (180 days), click **Authorize**, sign the message
 
-Then ask for: (1) the API wallet private key, (2) their master wallet address (0x...).
+Then ask for:
+1. the API wallet private key
+2. their master wallet address (0x...)
+
+Clarify the distinction explicitly:
+- The API wallet private key should resolve to the API/agent wallet address created in Hyperliquid's API page.
+- The master wallet address is the main wallet that authorized that API wallet.
+- These must be different addresses. If the user gives the same address for both, stop and ask them to re-check which one is their master wallet.
 
 ## Step 4 (live only) — Store and register wallet
 Call `setup_live_wallet` with `ethAgentPrivateKey`, `masterWalletAddress`, and `network`.

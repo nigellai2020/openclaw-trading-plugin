@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import { Crypto, Keys, Nip19 } from "@scom/scom-signer";
-import { Contract, Wallet } from "ethers";
+import { Contract, Wallet, getAddress } from "ethers";
 import {
   ERC20_ABI,
   getEvmChainConfig,
@@ -1254,8 +1254,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     name: "setup_live_wallet",
     description: "Store an agent wallet key in TEE and register it in the backend. Replaces sequential calls to store_wallet_in_tee + register_wallet. Call this tool directly from the current session; do not delegate it to a subagent or replace it with exec/direct HTTP workarounds.",
     parameters: Type.Object({
-      ethAgentPrivateKey: Type.String({ description: "Agent wallet private key (hex, without 0x)" }),
-      masterWalletAddress: Type.String({ description: "Master wallet address (0x...)" }),
+      ethAgentPrivateKey: Type.String({ description: "Hyperliquid API wallet private key (hex, without 0x). This should resolve to the API/agent wallet address, not the master wallet address." }),
+      masterWalletAddress: Type.String({ description: "Hyperliquid master wallet address (0x...). This must be different from the address resolved by ethAgentPrivateKey." }),
       network: Type.Optional(Type.String({ description: '"testnet" or "mainnet"', default: "testnet" })),
     }),
     async execute(
@@ -1269,10 +1269,23 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       // Step 1: Prepare encryption payload for wallet-agent delegation
       // (trading-data always forwards to wallet-agent TEE)
       let agentWalletAddress: string;
+      let normalizedMasterWalletAddress: string;
       let walletAgentPublicKey = "";
       let teeEncryptedPrivateKey = "";
       let walletAgentSignedAt = 0;
       try {
+        // Derive and validate the API wallet locally before any backend registration step.
+        const ethWallet = new Wallet("0x" + params.ethAgentPrivateKey);
+        agentWalletAddress = ethWallet.address;
+        normalizedMasterWalletAddress = getAddress(params.masterWalletAddress);
+
+        if (normalizedMasterWalletAddress === agentWalletAddress) {
+          throw new Error(
+            `masterWalletAddress matches the API wallet address derived from ethAgentPrivateKey (${agentWalletAddress}). ` +
+            "These must be different: provide your Hyperliquid master wallet address as masterWalletAddress, and the API wallet private key as ethAgentPrivateKey.",
+          );
+        }
+
         const pubKeyRes = await fetch(`${walletAgentUrl}/pubkey`);
         if (!pubKeyRes.ok) throw new Error(`Failed to get wallet-agent pubkey: ${pubKeyRes.status}`);
         const { publicKey: walletAgentPubKey } = await pubKeyRes.json();
@@ -1287,10 +1300,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         );
         teeEncryptedPrivateKey = `${encrypted}&pbk=02${ephemeralPubKey}`;
         walletAgentSignedAt = Math.floor(Date.now() / 1000);
-
-        // Derive the agent wallet address locally from the private key
-        const ethWallet = new Wallet("0x" + params.ethAgentPrivateKey);
-        agentWalletAddress = ethWallet.address;
         debugLog("setup_live_wallet", "prepare.delegation", { agentWalletAddress, walletAgentPublicKey });
 
         result.teeStorage = { ok: true, agentWalletAddress, delegated: true };
@@ -1330,7 +1339,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           walletAddress: agentWalletAddress,
           createdAt,
           walletType: "hyperliquid_agent",
-          masterWalletAddress: params.masterWalletAddress,
+          masterWalletAddress: normalizedMasterWalletAddress,
           hyperliquidNetwork: params.network ?? "testnet",
           walletAgentPublicKey,
           encryptedPrivateKey: teeEncryptedPrivateKey,
