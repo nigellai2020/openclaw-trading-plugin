@@ -152,11 +152,6 @@ export function createToolsContext(api: any) {
     return typeof symbol === "string" && symbol.trim() ? symbol.trim() : undefined;
   }
 
-  function inferAssetTypeFromSymbol(symbol?: string): "crypto" | "stocks" | undefined {
-    if (!symbol) return undefined;
-    return symbol.includes("/") ? "crypto" : "stocks";
-  }
-
   function normalizeSimulationProtocol(protocol?: string): string | undefined {
     if (!protocol) return undefined;
     return protocol.toLowerCase() === "hyperliquid" ? "hyperliquid" : "uniswap";
@@ -187,17 +182,10 @@ export function createToolsContext(api: any) {
     chainId?: number | null;
     protocol?: string;
     patch?: {
-      asset_type?: string;
       protocol?: string;
       chain_id?: number;
     };
   }): Record<string, unknown> {
-    const explicitAssetType = input.patch?.asset_type;
-    const inferredAssetType = explicitAssetType ?? inferAssetTypeFromSymbol(input.symbol) ?? "crypto";
-    if (inferredAssetType === "stocks") {
-      return { asset_type: "stocks" };
-    }
-
     const protocol = normalizeSimulationProtocol(
       input.patch?.protocol ?? input.protocol ?? (input.marketType === "perp" ? "hyperliquid" : undefined),
     ) ?? (input.marketType === "perp" ? "hyperliquid" : "uniswap");

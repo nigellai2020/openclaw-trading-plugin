@@ -6,7 +6,7 @@ export interface Venue {
 
 export interface SupportedPair {
   symbol: string;
-  asset_type: "crypto" | "stocks";
+  asset_type: "crypto";
   venues: Venue[];
 }
 
@@ -19,8 +19,6 @@ type ApiMode = {
 
 type ApiPair = {
   symbol?: string;
-  asset_type?: string;
-  signal_simulation_only?: boolean;
   modes?: ApiMode[];
 };
 
@@ -29,12 +27,6 @@ const MODE_KEY_TO_VENUE: Record<string, Venue> = {
   amm_spot_bnb: { protocol: "amm", chain_id: 56, name: "AMM Spot (BNB Chain)" },
   hyperliquid_perps_testnet: { protocol: "hyperliquid", chain_id: 998, name: "Hyperliquid Perps (Testnet)" },
   hyperliquid_perps_mainnet: { protocol: "hyperliquid", chain_id: 999, name: "Hyperliquid Perps (Mainnet)" },
-};
-
-const SIGNAL_SIMULATION_VENUE: Venue = {
-  protocol: "signal_simulation",
-  chain_id: 0,
-  name: "Signal Simulation (Paper only)",
 };
 
 export async function fetchSupportedPairsFromApi(baseUrl: string): Promise<SupportedPair[]> {
@@ -51,15 +43,6 @@ export async function fetchSupportedPairsFromApi(baseUrl: string): Promise<Suppo
   return rows.flatMap<SupportedPair>((row) => {
     const symbol = typeof row?.symbol === "string" ? row.symbol : "";
     if (!symbol) return [];
-
-    const assetType: "crypto" | "stocks" = row?.asset_type === "stock" ? "stocks" : "crypto";
-
-    if (assetType === "stocks") {
-      if (row.signal_simulation_only) {
-        return [{ symbol, asset_type: "stocks" as const, venues: [SIGNAL_SIMULATION_VENUE] }];
-      }
-      return [{ symbol, asset_type: "stocks" as const, venues: [] }];
-    }
 
     const venues: Venue[] = [];
     const modes = Array.isArray(row.modes) ? row.modes : [];

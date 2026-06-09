@@ -83,13 +83,11 @@ export const Strategy = Type.Object({
 });
 
 export const SimulationConfig = Type.Object({
-  asset_type: Type.String({ description: '"crypto" or "stocks"' }),
-  protocol: Type.Optional(Type.String({ description: '"uniswap" or "hyperliquid" (required when asset_type is "crypto")' })),
-  chain_id: Type.Optional(Type.Number({ description: "Uniswap: 1 (Ethereum), 56 (BSC), 8453 (Base), 42161 (Arbitrum). Hyperliquid: 998 (testnet), 999 (mainnet). Not needed for stocks." })),
+  protocol: Type.Optional(Type.String({ description: '"uniswap" or "hyperliquid"' })),
+  chain_id: Type.Optional(Type.Number({ description: "Uniswap: 1 (Ethereum), 56 (BSC), 8453 (Base), 42161 (Arbitrum). Hyperliquid: 998 (testnet), 999 (mainnet)." })),
 });
 
 export const SimulationConfigPatch = Type.Object({
-  asset_type: Type.Optional(Type.String({ description: 'Optional partial update for simulation asset type: "crypto" or "stocks"' })),
   protocol: Type.Optional(Type.String({ description: 'Optional partial update for simulation protocol: "uniswap" or "hyperliquid"' })),
   chain_id: Type.Optional(Type.Number({ description: "Optional partial update for simulation chain ID" })),
 });

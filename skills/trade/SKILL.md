@@ -22,9 +22,7 @@ Ask the user: **paper** or **live** mode?
 
 Then resolve the missing choices before continuing:
 - If the user did not already specify a market type, ask: **spot** or **perp**?
-- Ask (or infer) whether the agent trades **crypto** or **stocks** — this sets `assetType`.
-  - Stocks agents do not require a `chainId`.
-  - **Crypto agents require a `chainId` for both paper and live modes.**
+- **Crypto agents require a `chainId` for both paper and live modes.**
 - For crypto agents, resolve the chain:
   - For Hyperliquid: ask **testnet** or **mainnet**?
     - testnet → `chainId: 998`
@@ -250,8 +248,7 @@ Confirmation rules:
 ## Step 9 — Deploy agent
 Call `deploy_agent` with:
 - `name`, `mode`, `marketType`
-- `assetType`: always pass `"crypto"` or `"stocks"`
-- `chainId`: **required when `assetType` is `"crypto"`** — pass for both paper and live modes
+- `chainId`: **required** — pass for both paper and live modes
 - `symbol`: always pass when known
 - **Original agent:** also pass `strategy`; if perp: `leverage` (same as `strategy.risk_manager.leverage`)
 - **Copy agent:** pass `copiedFromAgentId` instead of `strategy` — do **not** pass a `strategy` object or `isPrivate`. Keep other optional fields omitted unless the user explicitly asked to override them.

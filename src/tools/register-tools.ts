@@ -324,22 +324,19 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     name: "get_supported_pairs",
     description:
       "Get supported trading pairs and which venues (protocol + chain) they are available on. " +
-      "Returns crypto pairs with venue availability and stock symbols (paper mode, signal simulation only). " +
-      "Use optional filters to narrow results by asset type or protocol.",
+      "Returns crypto pairs with venue availability. " +
+      "Use the optional protocol filter to narrow results.",
     parameters: Type.Object({
-      assetType: Type.Optional(
-        Type.String({ description: '"crypto" or "stocks". Omit for all.' }),
-      ),
       protocol: Type.Optional(
         Type.String({
           description:
-            '"uniswap", "hyperliquid", or "signal_simulation". Filters to pairs available on this protocol. Omit for all.',
+            '"uniswap" or "hyperliquid". Filters to pairs available on this protocol. Omit for all.',
         }),
       ),
     }),
     async execute(
       _id: string,
-      params: { assetType?: string; protocol?: string },
+      params: { protocol?: string },
     ) {
       let results = await fetchSupportedPairsFromApi(baseUrl);
 
@@ -349,11 +346,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             ...p,
             venues: p.venues.filter((v) => v.protocol !== "amm"),
           }))
-          .filter((p) => p.asset_type !== "crypto" || p.venues.length > 0);
-      }
-
-      if (params.assetType) {
-        results = results.filter((p) => p.asset_type === params.assetType);
+          .filter((p) => p.venues.length > 0);
       }
 
       if (params.protocol) {
@@ -720,7 +713,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           agentAddress?: string;
         };
         simulationConfig?: {
-          asset_type?: string;
           protocol?: string;
           chain_id?: number;
         };
@@ -767,13 +759,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
       if (params.marketType != null && params.marketType !== "spot" && params.marketType !== "perp") {
         return textResult({ error: 'marketType must be "spot" or "perp"' });
-      }
-      if (
-        params.simulationConfig?.asset_type != null &&
-        params.simulationConfig.asset_type !== "crypto" &&
-        params.simulationConfig.asset_type !== "stocks"
-      ) {
-        return textResult({ error: 'simulationConfig.asset_type must be "crypto" or "stocks"' });
       }
       if (hasOwnField(params, "copiedFromAgentId") && hasOwnField(params, "isPrivate")) {
         return textResult({
@@ -1488,7 +1473,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       strategy: Type.Optional(Strategy),
       strategyDescription: Type.Optional(Type.String({ description: "Human-readable strategy summary" })),
       copiedFromAgentId: Type.Optional(Type.Number({ description: "When creating a copy agent, pass the source public agent ID. Required when strategy is omitted. Strategy is resolved automatically; keep other optional fields omitted unless explicitly requested by the user." })),
-      assetType: Type.Optional(Type.String({ description: '"crypto" or "stocks". Asset type for paper-mode simulation.' })),
       walletAddress: Type.Optional(Type.String({ description: "Live wallet selector mapped to wallet_address. Can be a master wallet or agent wallet address in oswap_wallets." })),
       settlementConfig: Type.Optional(Type.Object({
         ethAddress: Type.String({ description: "Master wallet address (maps to settlement_config.eth_address). Required in live mode." }),
@@ -1509,7 +1493,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         strategy?: Record<string, unknown>;
         strategyDescription?: string;
         copiedFromAgentId?: number;
-        assetType?: string;
         walletAddress?: string;
         settlementConfig?: {
           ethAddress: string;
@@ -1593,6 +1576,12 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (resolvedChainId != null && marketType != null) {
           const chainErr = validateChainIdForMarketType(resolvedChainId, marketType);
           if (chainErr) return textResult({ error: chainErr });
+        }
+        // Crypto agents require a chainId; validate it here (before billing) so a
+        // missing chain fails fast instead of after billing side effects. Copy
+        // agents are exempt — trading-data resolves the chain from the source agent.
+        if (!isCopyAgent && resolvedChainId == null) {
+          return textResult({ error: "chainId is required: 1 (Ethereum) or 56 (BNB Chain) for spot, 998 (Hyperliquid testnet) or 999 (Hyperliquid mainnet) for perp." });
         }
         if (isLive && !params.walletAddress && !params.settlementConfig?.ethAddress) {
           return textResult({ error: "walletAddress or settlementConfig.ethAddress is required for live mode" });
@@ -1805,7 +1794,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (params.marketType != null) payload.marketType = marketType;
         if (leverage != null) payload.leverage = leverage;
         if (resolvedChainId != null) payload.chainId = resolvedChainId;
-        if (params.assetType) payload.assetType = params.assetType;
+        payload.assetType = "crypto";
         if (params.strategy) payload.strategy = params.strategy;
         if (params.strategyDescription) payload.strategyDescription = params.strategyDescription;
         if (params.copiedFromAgentId != null) payload.copiedFromAgentId = params.copiedFromAgentId;

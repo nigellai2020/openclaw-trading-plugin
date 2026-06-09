@@ -8,7 +8,7 @@ export interface Venue {
 
 export interface SupportedPair {
   symbol: string;
-  asset_type: "crypto" | "stocks";
+  asset_type: "crypto";
   venues: Venue[];
 }
 
@@ -41,8 +41,4 @@ export const SUPPORTED_PAIRS: SupportedPair[] = [
   { symbol: "BNB/USDC",   asset_type: "crypto", venues: [VENUES.amm_bnb] },
   { symbol: "BTC/USDT",   asset_type: "crypto", venues: [] },
   { symbol: "CAKE/USDT",  asset_type: "crypto", venues: [] },
-
-  // Stock symbols — paper mode, signal simulation only
-  ...["AAPL","MSFT","GOOGL","AMZN","NVDA","META","TSLA","SPY","QQQ","DIA","IWM","VTI","VOO","EEM","GLD","TLT"]
-    .map(s => ({ symbol: s, asset_type: "stocks" as const, venues: [{ protocol: "signal_simulation", chain_id: 0, name: "Signal Simulation (Paper only)" }] })),
 ];
