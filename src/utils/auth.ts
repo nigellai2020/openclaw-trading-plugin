@@ -1,7 +1,5 @@
 import { Keys, Nip19, Signer } from "@scom/scom-signer";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import { readOpenClawConfig, writeOpenClawConfig } from "./openclaw-config.js";
 
 export function loadKeys(config: any): {
   privateKey: string;
@@ -30,18 +28,13 @@ export function getAuthHeader(pubkey: string, privateKey: string): string {
 }
 
 export function persistKeyToConfig(privateKey: string): boolean {
-  const cfgPath = path.join(os.homedir(), ".openclaw", "openclaw.json");
-  let cfg: any = {};
-  try {
-    cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
-  } catch {}
+  const cfg: any = readOpenClawConfig();
 
   const entry = ((cfg.plugins ??= {}).entries ??= {})["trading-plugin"] ??= {};
   const config = (entry.config ??= {});
   if (config.nostrPrivateKey) return false;
 
   config.nostrPrivateKey = privateKey;
-  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
-  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  writeOpenClawConfig(cfg);
   return true;
 }

@@ -25,18 +25,18 @@ openclaw plugins install -l .
 
 Edit `~/.openclaw/openclaw.json` and add the plugin config:
 
-```json
+```json5
 {
-  "plugins": {
-    "entries": {
+  plugins: {
+    entries: {
       "trading-plugin": {
-        "config": {
-          "billingEnvironment": "test",
-          "nostrPrivateKey": "${NOSTR_PRIVATE_KEY}",
-          "nostrRelayUrl": "${NOSTR_RELAY_URL}" // optional, defaults to wss://nos.lol
-        }
-      }
-    }
+        config: {
+          billingEnvironment: "test",
+          nostrPrivateKey: "${NOSTR_PRIVATE_KEY}",
+          nostrRelayUrl: "${NOSTR_RELAY_URL}", // optional, defaults to wss://nos.lol
+        },
+      },
+    },
   }
 }
 ```
