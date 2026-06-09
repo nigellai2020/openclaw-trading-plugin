@@ -9,7 +9,7 @@ This skill uses `strategy.md` in the same folder as the canonical strategy-confi
 
 Before answering strategy questions or generating strategy JSON:
 
-1. Read `strategy.md`.
+1. Read `strategy.md` in the current session context. Do not spawn a subagent just to retrieve it.
 2. Treat `strategy.md` as the full reference for indicators, rules, risk management, examples, and deprecated syntax.
 3. When `strategy.md` is richer than the OpenClaw tool contract, prefer the registered tool parameter schemas and `src/schemas/strategy.ts` for the final JSON shape.
 4. Prefer the plugin-friendly canonical forms in output:
@@ -18,3 +18,5 @@ Before answering strategy questions or generating strategy JSON:
    - Prefer `"notional_quote"` and `"notional_base"` over deprecated aliases.
    - Avoid deprecated OHLC shorthand like `"close@M1[1]"`.
    - Include `order.side` on both open and close rules.
+
+This skill is reference-only. It must not be used to delegate plugin tool calls or agent-creation steps to a subagent.

@@ -1191,7 +1191,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "init_trading_session",
-    description: "Initialize a trading session: check/generate Nostr keys and optionally list wallets (live mode). Replaces sequential calls to get_or_create_nostr_keys + list_wallets.",
+    description: "Initialize a trading session: check/generate Nostr keys and optionally list wallets (live mode). Replaces sequential calls to get_or_create_nostr_keys + list_wallets. Call this tool directly from the current session; do not delegate it to a subagent or replace it with exec/direct HTTP workarounds.",
     parameters: Type.Object({
       mode: Type.Optional(Type.String({ description: '"paper" or "live"', default: "paper" })),
     }),
@@ -1252,7 +1252,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "setup_live_wallet",
-    description: "Store an agent wallet key in TEE and register it in the backend. Replaces sequential calls to store_wallet_in_tee + register_wallet.",
+    description: "Store an agent wallet key in TEE and register it in the backend. Replaces sequential calls to store_wallet_in_tee + register_wallet. Call this tool directly from the current session; do not delegate it to a subagent or replace it with exec/direct HTTP workarounds.",
     parameters: Type.Object({
       ethAgentPrivateKey: Type.String({ description: "Agent wallet private key (hex, without 0x)" }),
       masterWalletAddress: Type.String({ description: "Master wallet address (0x...)" }),
@@ -1372,7 +1372,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "prepare_agent_creation",
-    description: "Read-only preflight for agent creation (direct or copy). Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction. OpenClaw must present this result to the user and get explicit confirmation before calling deploy_agent. Keep optional fields omitted unless explicitly provided by the user.",
+    description: "Read-only preflight for agent creation (direct or copy). Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction. OpenClaw must present this result to the user and get explicit confirmation before calling deploy_agent. Call this tool directly from the current session only; do not route it through a subagent, exec, or direct HTTP workaround. Keep optional fields omitted unless explicitly provided by the user.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       mode: Type.Optional(Type.String({ description: '"paper" or "live". Optional; omit unless specified by the user.' })),
@@ -1479,7 +1479,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. The server handles all downstream trading-bot and settlement syncing internally on POST /api/agent. Conservative mode: only pass fields explicitly provided by the user, never invent defaults. If required values are missing, ask the user before retrying.",
+    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. The server handles all downstream trading-bot and settlement syncing internally on POST /api/agent. Call this tool directly from the current session only; do not route it through a subagent, exec, or direct HTTP workaround. Conservative mode: only pass fields explicitly provided by the user, never invent defaults. If required values are missing, ask the user before retrying.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount" })),
@@ -1921,7 +1921,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
   api.registerTool({
     name: "search_public_agents",
-    description: "Search public trading agents by name using /api/agents/search. Use this when a user references an agent by name but the source agent ID is unknown.",
+    description: "Search public trading agents by name using /api/agents/search. Use this when a user references an agent by name but the source agent ID is unknown. Call it directly from the current session and continue any follow-on plugin tool calls in that same session; do not delegate the search or the next tool call to a subagent.",
     parameters: Type.Object({
       query: Type.String({ description: "Agent name or partial name to search" }),
       limit: Type.Optional(Type.Number({ description: "Maximum number of matches to return (default 10)", default: 10 })),
