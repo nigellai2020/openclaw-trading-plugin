@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { readOpenClawConfig as readStoredOpenClawConfig } from "./openclaw-config.js";
 
 function escapeHtml(s: string): string {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -115,12 +116,12 @@ export function formatAgentDeactivationNotification(event: any): string {
   return `[Agent Deactivated] Agent ${agentLabel} has been deactivated due to ${reason}.${source}`;
 }
 
-function readOpenClawConfig(): { botToken: string | null; chatId: string | null } {
+function readTelegramConfig(): { botToken: string | null; chatId: string | null } {
   const openclawDir = path.join(os.homedir(), ".openclaw");
   let botToken: string | null = null;
   let chatId: string | null = null;
   try {
-    const config = JSON.parse(fs.readFileSync(path.join(openclawDir, "openclaw.json"), "utf8"));
+    const config: any = readStoredOpenClawConfig(openclawDir);
     botToken = config.channels?.telegram?.botToken ?? null;
   } catch {}
   try {
@@ -142,7 +143,7 @@ export function createTelegramNotifier(): (message: string, options?: { parseMod
 
   return async (message, options) => {
     if (!telegramBotToken || !telegramChatId) {
-      const config = readOpenClawConfig();
+      const config = readTelegramConfig();
       telegramBotToken = config.botToken;
       telegramChatId = config.chatId;
       if (!telegramBotToken || !telegramChatId) return;

@@ -12,7 +12,7 @@ openclaw gateway restart
 
 ## Configuration
 
-Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/config.json5`:
+Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/openclaw.json`:
 
 ```json5
 {
