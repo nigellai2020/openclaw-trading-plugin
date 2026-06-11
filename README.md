@@ -2,6 +2,46 @@
 
 OpenClaw plugin for trading data, paper trading, live trading (Hyperliquid), copy-trading, and backtesting.
 
+Copyright (c) 2026 OpenSwap — Licensed under the [MIT License](./LICENSE).
+
+---
+
+## ⚠️ IMPORTANT — READ BEFORE USING
+
+**BY INSTALLING, RUNNING, COPYING, DISTRIBUTING, OR OTHERWISE USING THIS
+SOFTWARE YOU AGREE TO THE TERMS BELOW AND IN [`DISCLAIMER.md`](./DISCLAIMER.md).**
+
+1. **Not financial advice.** Nothing in this plugin is financial, investment,
+   legal, tax, or trading advice. You are solely responsible for every
+   decision you make and every trade you execute. Consult a qualified
+   professional before acting.
+2. **Use at your own risk.** Trading digital assets, perpetuals, and other
+   instruments is inherently risky and may result in **total loss** of
+   capital. Past, paper, or backtested performance is **not** indicative
+   of future results.
+3. **No warranty.** The software is provided "AS IS", without warranty of
+   any kind, express or implied.
+4. **No liability.** To the maximum extent permitted by law, the author(s)
+   and copyright holder(s) are **not liable** for any direct, indirect,
+   incidental, special, consequential, exemplary, or punitive damages
+   (including loss of funds, profits, data, or keys) arising from your
+   use of, or inability to use, the software or any third-party service
+   it integrates with.
+5. **Your keys, your funds.** You are solely responsible for safeguarding
+   your `NOSTR_PRIVATE_KEY`, wallet keys, and any credentials. The
+   author(s) do not custody or have access to your funds.
+6. **Compliance is on you.** You are responsible for complying with all
+   laws, regulations, and sanctions applicable to you.
+
+The full disclaimer — including a US$100 aggregate-liability cap where
+permitted, an indemnification clause, an arbitration clause, and the
+complete limitation of liability — is in [`DISCLAIMER.md`](./DISCLAIMER.md).
+Third-party components and notices are listed in [`NOTICE`](./NOTICE).
+
+**If you do not agree to these terms, do not install or use this software.**
+
+---
+
 ## Install
 
 ```bash
@@ -87,3 +127,17 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/openclaw
 | `backtest`           | Guided workflow for running backtests    |
 | `strategy-reference` | Loads the canonical trading strategy reference from `skills/strategy-reference/strategy.md` |
 | `nostr-identity`     | Retrieve user's Nostr identity           |
+
+---
+
+## Legal
+
+- **License:** [MIT](./LICENSE) — `Copyright (c) 2026 OpenSwap`
+- **Full disclaimer (no advice / no warranty / no liability / arbitration):**
+  see [`DISCLAIMER.md`](./DISCLAIMER.md)
+- **Third-party notices:** see [`NOTICE`](./NOTICE)
+
+The author(s) and copyright holder(s) provide this software **as-is** and
+disclaim all warranties and liability to the maximum extent permitted by
+applicable law. By using this software you accept the terms in
+[`DISCLAIMER.md`](./DISCLAIMER.md).

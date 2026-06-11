@@ -3,6 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "OpenSwap",
+    "type": "Organization"
+  },
+  "copyright": "Copyright (c) 2026 OpenSwap",
+  "homepage": "https://github.com/scom-repos/openclaw-trading-plugin",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scom-repos/openclaw-trading-plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/scom-repos/openclaw-trading-plugin/issues"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test:billing-flow": "node scripts/billing-flow-test.cjs",

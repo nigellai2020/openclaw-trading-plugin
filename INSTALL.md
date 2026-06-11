@@ -1,5 +1,7 @@
 # Installation
 
+> ⚠️ **By installing this plugin you agree to [`DISCLAIMER.md`](./DISCLAIMER.md) and the [`LICENSE`](./LICENSE) (MIT).** This software is not financial advice, is provided "AS IS" without warranty, and the author(s) are not liable for any losses. See [`DISCLAIMER.md`](./DISCLAIMER.md) for the full terms.
+
 ## 1. Install OpenClaw
 
 ```bash
