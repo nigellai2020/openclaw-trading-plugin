@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test:billing-flow": "node scripts/billing-flow-test.cjs"
+    "test:billing-flow": "node scripts/billing-flow-test.cjs",
+    "test:notifications": "node --import tsx --test tests/notifications.test.ts"
   },
   "openclaw": {
     "extensions": [
@@ -21,6 +22,7 @@
     "@noble/hashes": "^2.0.1",
     "@sinclair/typebox": "^0.34.0",
     "@types/node": "^22.0.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.7.0"
   }
 }
