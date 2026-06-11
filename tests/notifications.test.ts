@@ -1,6 +1,11 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { formatAgentDeactivationNotification, formatBacktestSummary } from "../src/utils/notifications.js";
+import {
+  formatAgentDeactivationNotification,
+  formatBacktestSummary,
+  formatBillingExpiryNotification,
+  formatFillNotification,
+} from "../src/utils/notifications.js";
 
 const TG_LIMIT = 4096;
 
@@ -45,7 +50,7 @@ test("formatBacktestSummary ranks winners first, no-trades last, collapses no-tr
   assert.ok(Array.isArray(out));
   assert.equal(out.length, 1);
   const msg = out[0];
-  assert.ok(msg.startsWith("<b>[Auto Backtest Summary] 2026-04-19</b>"));
+  assert.ok(msg.startsWith("<b>Backtest summary for 2026-04-19</b>"));
 
   const winIdx = msg.indexOf("<b>WinAgent</b>:");
   const lossIdx = msg.indexOf("<b>LossAgent</b>:");
@@ -53,14 +58,14 @@ test("formatBacktestSummary ranks winners first, no-trades last, collapses no-tr
   assert.ok(winIdx > 0 && lossIdx > winIdx, "winner should come before loser");
   assert.ok(quietIdx > lossIdx, "no-trade agent should come last");
 
-  assert.ok(msg.includes("<b>180d</b>: no trade"));
-  assert.ok(msg.includes("<b>30d</b>: no trade"));
-  assert.ok(msg.includes("<b>1d</b>: no trade"));
+  assert.ok(msg.includes("<b>180d</b>: No trades in this period"));
+  assert.ok(msg.includes("<b>30d</b>: No trades in this period"));
+  assert.ok(msg.includes("<b>1d</b>: No trades in this period"));
   assert.ok(!msg.includes("no trades ("));
 
-  assert.ok(msg.includes("Ret 12%"));
-  assert.ok(msg.includes("DD 4%"));
-  assert.ok(msg.includes("WR 70%"));
+  assert.ok(msg.includes("Return 12%"));
+  assert.ok(msg.includes("Max drawdown 4%"));
+  assert.ok(msg.includes("Win rate 70%"));
 
   assert.ok(msg.length <= TG_LIMIT);
 });
@@ -107,6 +112,60 @@ test("formatAgentDeactivationNotification formats fallback payload", () => {
       reason: "consecutive_order_failures",
       source: "trading-bot",
     }),
-    "[Agent Deactivated] Agent Mean Reversion (ID: 42) has been deactivated due to consecutive order failures. Source: trading-bot.",
+    "[Agent update] Mean Reversion (Agent 42) was deactivated after consecutive order failures. Reported by trading-bot.",
+  );
+});
+
+test("formatFillNotification formats successful fills with friendlier wording", () => {
+  assert.equal(
+    formatFillNotification({
+      event: "fill_executed",
+      agent_id: 42,
+      agent_name: "Mean Reversion",
+      symbol: "BTC",
+      side: "buy",
+      is_entry: true,
+      base_amount: "0.25",
+      execution_price: "65432.1",
+      success: true,
+    }),
+    "[Trade update] Mean Reversion (Agent 42) opened a BUY trade for 0.25 BTC at $65432.1000.",
+  );
+});
+
+test("formatFillNotification formats failed fills with friendlier wording", () => {
+  assert.equal(
+    formatFillNotification({
+      event: "fill_executed",
+      agent_name: "Momentum",
+      symbol: "ETH",
+      side: "sell",
+      success: false,
+    }),
+    "[Trade update] Momentum could not execute a SELL order for ETH.",
+  );
+});
+
+test("formatBillingExpiryNotification formats reminders without raw seconds", () => {
+  assert.equal(
+    formatBillingExpiryNotification({
+      event: "billing_expiry_reminder",
+      agent_id: 42,
+      agent_name: "Mean Reversion",
+      seconds_left: 45,
+      renewal_at: 1718123456,
+    }),
+    "[Billing reminder] Mean Reversion (Agent 42) billing renews in less than a minute, at Jun 11, 2024, 4:30 PM UTC.",
+  );
+});
+
+test("formatBillingExpiryNotification formats expired billing notices", () => {
+  assert.equal(
+    formatBillingExpiryNotification({
+      event: "agent_billing_expired",
+      agent_name: "Momentum",
+      renewal_at: 1718123456,
+    }),
+    "[Billing update] Momentum billing expired at Jun 11, 2024, 4:30 PM UTC.",
   );
 });

@@ -1,0 +1,42 @@
+NOTICE
+
+trading-plugin for OpenClaw
+Copyright (c) 2026 OpenSwap
+
+This product includes software developed by OpenSwap and contributors.
+
+================================================================================
+THIRD-PARTY COMPONENTS
+================================================================================
+
+This software includes or interacts with the following third-party components
+and services. Use of each is subject to its own license, terms, and risk
+disclosures. The author of this Software is not responsible for, and does not
+endorse, any third-party component or service.
+
+  - OpenClaw (openclaw.ai) — runtime / gateway
+  - Hyperliquid (hyperliquid.xyz) — live-trading venue
+  - Nostr (NIP-04 kind-4 DMs) — notifications transport
+  - Ethereum / EVM-compatible networks
+  - ethers.js (MIT, Richard Moore and contributors)
+  - nostr-tools (MIT, fisc-free / Damus)
+  - @scom/scom-signer (per its own license)
+
+================================================================================
+NO WARRANTY / NO LIABILITY
+================================================================================
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+For a comprehensive disclaimer — including a "no financial advice" clause, an
+assumption-of-risk clause, an indemnification clause, a US$100 aggregate
+liability cap where permitted, and an arbitration clause — see
+[`DISCLAIMER.md`](./DISCLAIMER.md).
+
+For the full license text, see [`LICENSE`](./LICENSE).

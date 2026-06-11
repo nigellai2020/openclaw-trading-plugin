@@ -4,6 +4,7 @@ import { decrypt } from "nostr-tools/nip04";
 import {
   createTelegramNotifier,
   formatAgentDeactivationNotification,
+  formatBillingExpiryNotification,
   formatBacktestSummary,
   formatFillNotification,
 } from "../utils/notifications.js";
@@ -101,6 +102,9 @@ export function registerNostrNotifications(
                 for (const msg of msgs) await sendNotification(msg, { parseMode: "HTML" });
               } else if (parsed?.event === "agent_deactivated") {
                 const msg = formatAgentDeactivationNotification(parsed);
+                await sendNotification(msg);
+              } else if (parsed?.event === "agent_billing_expired" || parsed?.event === "billing_expiry_reminder") {
+                const msg = formatBillingExpiryNotification(parsed);
                 await sendNotification(msg);
               }
             } catch (e: any) {
