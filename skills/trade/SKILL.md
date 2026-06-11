@@ -9,6 +9,8 @@ Follow these steps to create a paper or live trading agent. This skill covers bo
 
 **Copy-agent path:** If the user wants to copy, follow, or duplicate an existing agent, that is handled by this same skill. When in copy mode, Steps 1–4 are the same, Step 5 (Build strategy) is **skipped**, and the `copiedFromAgentId` is passed to `prepare_agent_creation` and `deploy_agent` instead of a strategy object.
 
+**Scope boundary:** This skill is for new agent creation only. If the user wants to top up billing for an existing agent before expiry, switch to the `manage-agents` skill and use `prepare_agent_billing_renewal` followed by `renew_agent_billing` after the user funds the billing wallet.
+
 **Session constraint (strict):** All plugin tool calls in this workflow (`init_trading_session`, `setup_live_wallet`, `search_public_agents`, `prepare_agent_creation`, `deploy_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
 
 **No-fabrication rule (strict):** Do not invent, auto-fill, or infer values the user did not provide. Keep optional fields omitted. If a required field is missing or ambiguous, ask the user a direct follow-up question before calling tools.
@@ -294,6 +296,7 @@ Handle the response:
   - vault deposit made and updated vault credit
   - fee breakdown reused from the preflight checkout
   - next billing date estimate
+  - remind the user that future top-ups for this same agent use `prepare_agent_billing_renewal` and `renew_agent_billing`
   - remind the user that there should be at least `billing.result.feeBreakdown.firstBillingAmount` OSWAP in the billing wallet by `billing.result.nextBillingDateEstimate` for auto renewal
   - include any warning returned in `billing.result.warning`
 - **log.ok = false**: Warn but continue (action log is non-critical).

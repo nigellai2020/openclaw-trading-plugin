@@ -110,16 +110,16 @@ function buildBillingBreakdown(
   const bnbShortfall = funding?.bnbShortfall ?? "0";
   const oswapShortfall = fees.oswapShortfall ?? "0";
 
-  let summary = `Need up to ${totalBnbNeeded} BNB total on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}.`;
+  let summary = `Need up to ${totalBnbNeeded} BNB total on ${wallet.networkLabel ?? billingEvmConfig.networkLabel} for billing.`;
   if (Number(oswapShortfall) > 0) {
     summary =
-      `Need up to ${totalBnbNeeded} BNB total on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}: ` +
+      `Need up to ${totalBnbNeeded} BNB total on ${wallet.networkLabel ?? billingEvmConfig.networkLabel} for billing: ` +
       `${bnbForSwapMax} BNB max to swap into ${oswapShortfall} ${tokenSymbol} plus ${bnbForGas} BNB for gas.`;
   } else if (Number(bnbShortfall) > 0) {
     summary =
       `Existing ${tokenSymbol} covers billing. Need ${bnbForGas} BNB for gas on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}.`;
   } else {
-    summary = `Existing ${tokenSymbol} and BNB balances already cover the setup on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}.`;
+    summary = `Existing ${tokenSymbol} and BNB balances already cover the billing requirement on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}.`;
   }
 
   return {
@@ -161,6 +161,272 @@ function buildBillingBreakdown(
         }
       : null,
   };
+}
+
+function buildInitialBillingTransactions(preparedContext: PreparedAgentCreationContext): Record<string, any> {
+  return {
+    swap: { ok: preparedContext.oswapShortfallRaw === 0n, skipped: preparedContext.oswapShortfallRaw === 0n },
+    nftApproval: { ok: !preparedContext.nftApprovalRequired, skipped: !preparedContext.nftApprovalRequired },
+    nftMint: { ok: preparedContext.oswapForNftRaw === 0n, skipped: preparedContext.oswapForNftRaw === 0n },
+    vaultApproval: { ok: !preparedContext.vaultApprovalRequired, skipped: !preparedContext.vaultApprovalRequired },
+    vaultDeposit: { ok: preparedContext.oswapForInitialVaultCreditRaw === 0n, skipped: preparedContext.oswapForInitialVaultCreditRaw === 0n },
+  };
+}
+
+async function executeBillingFundingTransactions(input: {
+  preparedContext: PreparedAgentCreationContext;
+  billingWallet: Wallet;
+  billingTransactions: Record<string, any>;
+  billingEvmConfig: {
+    networkLabel: string;
+    tokenSymbol: string;
+    tokenDecimals: number;
+    routerAddress: string;
+    wethAddress: string;
+    tokenAddress: string;
+    vaultAddress: string;
+  };
+  buildBillingHeaders: (wallet: Wallet) => Promise<EthHeaders>;
+  waitForVaultCredit: (
+    wallet: Wallet,
+    minimumAvailableBalanceRaw: bigint,
+  ) => Promise<{ availableBalanceRaw: bigint }>;
+}): Promise<EthHeaders> {
+  const {
+    preparedContext,
+    billingWallet,
+    billingTransactions,
+    billingEvmConfig,
+    buildBillingHeaders,
+    waitForVaultCredit,
+  } = input;
+
+  if (preparedContext.bnbShortfallRaw > 0n) {
+    throw new Error(
+      `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`,
+    );
+  }
+
+  const swapPath = [billingEvmConfig.wethAddress, billingEvmConfig.tokenAddress];
+  const routerContract = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, billingWallet) as any;
+  const tokenContract = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, billingWallet) as any;
+  const vaultContract = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, billingWallet) as any;
+  const selectedEligibleNft = preparedContext.selectedEligibleNft;
+  const nftContract = selectedEligibleNft
+    ? new Contract(selectedEligibleNft.contractAddress, NFT_ABI, billingWallet) as any
+    : undefined;
+
+  if (!selectedEligibleNft && (preparedContext.nftApprovalRequired || preparedContext.oswapForNftRaw > 0n)) {
+    throw new Error("No active eligible NFT config available");
+  }
+
+  const failBilling = (step: string, error: string): never => {
+    billingTransactions[step] = { ok: false, skipped: false, error };
+    throw new Error(error);
+  };
+
+  if (preparedContext.oswapShortfallRaw > 0n) {
+    try {
+      const deadline = Math.floor(Date.now() / 1000) + 1_200;
+      const swapTx = await routerContract.swapETHForExactTokens(
+        preparedContext.oswapShortfallRaw,
+        swapPath,
+        billingWallet.address,
+        deadline,
+        { value: preparedContext.bnbForSwapMaxRaw },
+      );
+      const receipt = await swapTx.wait();
+      billingTransactions.swap = {
+        ok: true,
+        skipped: false,
+        txHash: receipt.hash,
+        oswapAmount: formatAmount(preparedContext.oswapShortfallRaw, billingEvmConfig.tokenDecimals),
+        maxBnbAmount: formatAmount(preparedContext.bnbForSwapMaxRaw, 18, 8),
+      };
+    } catch (e: any) {
+      failBilling("swap", `BNB to ${billingEvmConfig.tokenSymbol} swap failed: ${e.message}`);
+    }
+  }
+
+  if (preparedContext.nftApprovalRequired) {
+    try {
+      const approveTx = await tokenContract.approve(
+        selectedEligibleNft!.contractAddress,
+        preparedContext.oswapForNftRaw,
+      );
+      const receipt = await approveTx.wait();
+      billingTransactions.nftApproval = {
+        ok: true,
+        skipped: false,
+        txHash: receipt.hash,
+        amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
+      };
+    } catch (e: any) {
+      failBilling("nftApproval", `NFT approval failed: ${e.message}`);
+    }
+  }
+
+  if (preparedContext.oswapForNftRaw > 0n) {
+    try {
+      const mintTx = await nftContract!.stake(preparedContext.oswapForNftRaw);
+      const receipt = await mintTx.wait();
+      billingTransactions.nftMint = {
+        ok: true,
+        skipped: false,
+        txHash: receipt.hash,
+        amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
+      };
+    } catch (e: any) {
+      failBilling("nftMint", `NFT mint failed: ${e.message}`);
+    }
+  }
+
+  if (preparedContext.vaultApprovalRequired) {
+    try {
+      const approveTx = await tokenContract.approve(
+        billingEvmConfig.vaultAddress,
+        preparedContext.oswapForInitialVaultCreditRaw,
+      );
+      const receipt = await approveTx.wait();
+      billingTransactions.vaultApproval = {
+        ok: true,
+        skipped: false,
+        txHash: receipt.hash,
+        amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+      };
+    } catch (e: any) {
+      failBilling("vaultApproval", `Vault approval failed: ${e.message}`);
+    }
+  }
+
+  if (preparedContext.oswapForInitialVaultCreditRaw > 0n) {
+    try {
+      const depositTx = await vaultContract.deposit(
+        billingWallet.address,
+        preparedContext.oswapForInitialVaultCreditRaw,
+      );
+      const receipt = await depositTx.wait();
+      const indexedBalance = await waitForVaultCredit(
+        billingWallet,
+        preparedContext.existingVaultCreditRaw + preparedContext.oswapForInitialVaultCreditRaw,
+      );
+      billingTransactions.vaultDeposit = {
+        ok: true,
+        skipped: false,
+        txHash: receipt.hash,
+        amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+        indexedAvailableBalance: formatAmount(indexedBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
+      };
+    } catch (e: any) {
+      failBilling("vaultDeposit", `Vault deposit failed: ${e.message}`);
+    }
+  }
+
+  return await buildBillingHeaders(billingWallet);
+}
+
+function buildAgentRenewalPreflightResult(input: {
+  agentId: number;
+  agentProfile: any;
+  preparedContext: PreparedAgentCreationContext;
+  nextRenewalAt?: string | null;
+}) {
+  const { agentId, agentProfile, preparedContext, nextRenewalAt } = input;
+  const prepared = preparedContext.prepared;
+  const symbol = typeof agentProfile?.pair === "string" && agentProfile.pair.trim()
+    ? agentProfile.pair.trim()
+    : typeof agentProfile?.symbol === "string" && agentProfile.symbol.trim()
+      ? agentProfile.symbol.trim()
+      : prepared.executionPlan.symbol;
+
+  const actions = prepared.executionPlan.actions
+    .filter((action) => !action.startsWith("Create "))
+    .concat(`Renew billing credit for agent "${agentProfile?.name ?? prepared.executionPlan.agentName}"${symbol ? ` (${symbol})` : ""}.`);
+
+  return {
+    ...prepared,
+    agent: {
+      id: agentId,
+      name: agentProfile?.name ?? prepared.executionPlan.agentName,
+      mode: agentProfile?.mode ?? prepared.executionPlan.mode,
+      marketType: agentProfile?.marketType === "perp" ? "perp" : prepared.executionPlan.marketType,
+      symbol,
+    },
+    subscription: prepared.subscription
+      ? {
+          ...prepared.subscription,
+          estimatedEndTime: nextRenewalAt ?? prepared.subscription.estimatedEndTime,
+        }
+      : undefined,
+    executionPlan: {
+      ...prepared.executionPlan,
+      symbol,
+      actions,
+    },
+    renewal: {
+      agentId,
+      nextBillingDateEstimate: nextRenewalAt ?? prepared.subscription?.estimatedEndTime ?? null,
+      subscriptionMatched: nextRenewalAt != null,
+    },
+    confirmationRequired: true,
+    nextStep: "present_renewal_checkout_and_wait_for_explicit_confirmation",
+  };
+}
+
+async function loadAgentRenewalContext(input: {
+  agentId: number;
+  npub: string;
+  publicKey: string;
+  privateKey: string;
+  fetchPublicAgentProfile: (agentId: number) => Promise<any>;
+  prepareAgentCreationContext: (input: {
+    name: string;
+    mode?: string;
+    marketType?: string;
+    symbol?: string;
+    agentId?: number;
+    npub: string;
+    publicKey: string;
+    privateKey: string;
+  }) => Promise<PreparedAgentCreationContext>;
+  fetchBillingSubscriptionsSnapshot: (wallet: Wallet) => Promise<{
+    subscriptions: any[];
+    walletRegistered: boolean;
+  }>;
+}): Promise<{
+  agentProfile: any;
+  preparedContext: PreparedAgentCreationContext;
+  nextRenewalAt: string | null;
+}> {
+  const agentProfile = await input.fetchPublicAgentProfile(input.agentId);
+  const mode = agentProfile?.mode === "live" ? "live" : "paper";
+  const marketType = agentProfile?.marketType === "perp" ? "perp" : "spot";
+  const symbol = typeof agentProfile?.pair === "string" && agentProfile.pair.trim()
+    ? agentProfile.pair.trim()
+    : typeof agentProfile?.symbol === "string" && agentProfile.symbol.trim()
+      ? agentProfile.symbol.trim()
+      : undefined;
+  const preparedContext = await input.prepareAgentCreationContext({
+    name: agentProfile?.name ?? `Agent ${input.agentId}`,
+    mode,
+    marketType,
+    symbol,
+    agentId: input.agentId,
+    npub: input.npub,
+    publicKey: input.publicKey,
+    privateKey: input.privateKey,
+  });
+
+  let nextRenewalAt: string | null = null;
+  if (preparedContext.billingWallet) {
+    try {
+      const { subscriptions } = await input.fetchBillingSubscriptionsSnapshot(preparedContext.billingWallet);
+      const matchedSubscription = subscriptions.find((subscription: any) => Number(subscription.agent_id) === input.agentId);
+      nextRenewalAt = matchedSubscription?.next_renewal_at ?? null;
+    } catch {}
+  }
+
+  return { agentProfile, preparedContext, nextRenewalAt };
 }
 
 function resolveChainLabel(chainId: number | null | undefined): string | null {
@@ -637,6 +903,166 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           error: e.message,
         });
       }
+    },
+  });
+
+  api.registerTool({
+    name: "prepare_agent_billing_renewal",
+    description: "Read-only preflight for renewing billing credit for an existing agent. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is ready, calculates the OSWAP top-up and BNB required for the next renewal period, and returns funding instructions before any on-chain transaction. OpenClaw must present this result to the user and wait for explicit confirmation or funding completion before calling renew_agent_billing.",
+    parameters: Type.Object({
+      agentId: Type.Number({ description: "Agent ID to renew billing for" }),
+    }),
+    async execute(_id: string, params: { agentId: number }) {
+      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
+      debugLog("prepare_agent_billing_renewal", "entry", {
+        agentId: params.agentId,
+        usesNostrPrivateKey: true,
+      });
+
+      try {
+        const { agentProfile, preparedContext, nextRenewalAt } = await loadAgentRenewalContext({
+          agentId: params.agentId,
+          npub,
+          publicKey,
+          privateKey,
+          fetchPublicAgentProfile,
+          prepareAgentCreationContext,
+          fetchBillingSubscriptionsSnapshot,
+        });
+        const result = buildAgentRenewalPreflightResult({
+          agentId: params.agentId,
+          agentProfile,
+          preparedContext,
+          nextRenewalAt,
+        });
+        debugLog("prepare_agent_billing_renewal", "result", result);
+        return textResult(result);
+      } catch (e: any) {
+        return textResult({ error: e.message, agentId: params.agentId });
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "renew_agent_billing",
+    description: "Execute the billing renewal funding flow for an existing agent after the user has topped up BNB in the billing wallet. Reuses the same swap, approval, and vault deposit logic as deploy_agent, but does not create or update the agent itself. Call this tool directly from the current session only after explicit user confirmation.",
+    parameters: Type.Object({
+      agentId: Type.Number({ description: "Agent ID to renew billing for" }),
+    }),
+    async execute(_id: string, params: { agentId: number }) {
+      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
+      const result: Record<string, unknown> = {
+        renewal: {
+          agentId: params.agentId,
+        },
+      };
+
+      let agentProfile: any;
+      let preparedContext: PreparedAgentCreationContext;
+      let nextRenewalAt: string | null = null;
+      try {
+        const loaded = await loadAgentRenewalContext({
+          agentId: params.agentId,
+          npub,
+          publicKey,
+          privateKey,
+          fetchPublicAgentProfile,
+          prepareAgentCreationContext,
+          fetchBillingSubscriptionsSnapshot,
+        });
+        agentProfile = loaded.agentProfile;
+        preparedContext = loaded.preparedContext;
+        nextRenewalAt = loaded.nextRenewalAt;
+      } catch (e: any) {
+        return textResult({ error: e.message, ...result });
+      }
+
+      const preflight = buildAgentRenewalPreflightResult({
+        agentId: params.agentId,
+        agentProfile,
+        preparedContext,
+        nextRenewalAt,
+      });
+      result.agent = preflight.agent;
+
+      if (!preparedContext.prepared.billing.required) {
+        result.billing = {
+          required: false,
+          bypassed: true,
+          reason: "billing_not_required",
+        };
+        return textResult(result);
+      }
+
+      const activeBillingWallet = preparedContext.billingWallet;
+      if (!activeBillingWallet) {
+        return textResult({ error: "Billing wallet could not be derived from nostrPrivateKey", ...result });
+      }
+
+      const billingTransactions = buildInitialBillingTransactions(preparedContext);
+      result.billing = {
+        required: true,
+        walletAddress: activeBillingWallet.address,
+        preflight,
+        confirmationRequired: true,
+        transactions: billingTransactions,
+      };
+
+      if (preparedContext.bnbShortfallRaw > 0n) {
+        return textResult({
+          error: `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`,
+          billingShortfall: buildBillingBreakdown(preparedContext, billingEvmConfig),
+          ...result,
+        });
+      }
+
+      try {
+        await executeBillingFundingTransactions({
+          preparedContext,
+          billingWallet: activeBillingWallet,
+          billingTransactions,
+          billingEvmConfig,
+          buildBillingHeaders,
+          waitForVaultCredit,
+        });
+      } catch (e: any) {
+        return textResult({
+          error: e.message,
+          ...result,
+        });
+      }
+
+      try {
+        const [postBalance, subscriptions] = await Promise.all([
+          fetchBillingBalanceSnapshot(activeBillingWallet),
+          fetchBillingSubscriptions(activeBillingWallet),
+        ]);
+        const matchedSubscription = subscriptions.find((subscription: any) => Number(subscription.agent_id) === params.agentId);
+        (result.billing as any).result = {
+          nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
+          vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+          updatedVaultCredit: formatAmount(postBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
+          pendingWithdrawalCredit: formatAmount(postBalance.pendingWithdrawalBalanceRaw, billingEvmConfig.tokenDecimals),
+          feeBreakdown: preparedContext.prepared.fees,
+          agentId: params.agentId,
+          agentName: agentProfile?.name ?? preflight.agent.name,
+          nextBillingDateEstimate: matchedSubscription?.next_renewal_at
+            ?? new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
+        };
+      } catch (e: any) {
+        (result.billing as any).result = {
+          nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
+          vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
+          feeBreakdown: preparedContext.prepared.fees,
+          agentId: params.agentId,
+          agentName: agentProfile?.name ?? preflight.agent.name,
+          nextBillingDateEstimate: new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
+          warning: e.message,
+        };
+      }
+
+      debugLog("renew_agent_billing", "result", result);
+      return textResult(result);
     },
   });
 
@@ -1649,13 +2075,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           return textResult({ error: "Billing wallet could not be derived from nostrPrivateKey" });
         }
         billingWallet = activeBillingWallet;
-        billingTransactions = {
-          swap: { ok: preparedContext.oswapShortfallRaw === 0n, skipped: preparedContext.oswapShortfallRaw === 0n },
-          nftApproval: { ok: !preparedContext.nftApprovalRequired, skipped: !preparedContext.nftApprovalRequired },
-          nftMint: { ok: preparedContext.oswapForNftRaw === 0n, skipped: preparedContext.oswapForNftRaw === 0n },
-          vaultApproval: { ok: !preparedContext.vaultApprovalRequired, skipped: !preparedContext.vaultApprovalRequired },
-          vaultDeposit: { ok: preparedContext.oswapForInitialVaultCreditRaw === 0n, skipped: preparedContext.oswapForInitialVaultCreditRaw === 0n },
-        };
+        billingTransactions = buildInitialBillingTransactions(preparedContext);
         result.billing = {
           required: true,
           walletAddress: activeBillingWallet.address,
@@ -1671,124 +2091,21 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             ...result,
           });
         }
-
-        const swapPath = [billingEvmConfig.wethAddress, billingEvmConfig.tokenAddress];
-        const routerContract = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, activeBillingWallet) as any;
-        const tokenContract = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, activeBillingWallet) as any;
-        if (!preparedContext.selectedEligibleNft) {
-          return textResult({ error: "No active eligible NFT config available", ...result });
-        }
-        const nftContract = new Contract(preparedContext.selectedEligibleNft.contractAddress, NFT_ABI, activeBillingWallet) as any;
-        const vaultContract = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, activeBillingWallet) as any;
-
-        const failBilling = (step: string, error: string) => {
-          if (billingTransactions) {
-            billingTransactions[step] = { ok: false, skipped: false, error };
-          }
+        try {
+          billingHeaders = await executeBillingFundingTransactions({
+            preparedContext,
+            billingWallet: activeBillingWallet,
+            billingTransactions,
+            billingEvmConfig,
+            buildBillingHeaders,
+            waitForVaultCredit,
+          });
+        } catch (e: any) {
           return textResult({
-            error,
+            error: e.message,
             ...result,
           });
-        };
-
-        if (preparedContext.oswapShortfallRaw > 0n) {
-          try {
-            const deadline = Math.floor(Date.now() / 1000) + 1_200;
-            const swapTx = await routerContract.swapETHForExactTokens(
-              preparedContext.oswapShortfallRaw,
-              swapPath,
-              activeBillingWallet.address,
-              deadline,
-              { value: preparedContext.bnbForSwapMaxRaw },
-            );
-            const receipt = await swapTx.wait();
-            billingTransactions!.swap = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              oswapAmount: formatAmount(preparedContext.oswapShortfallRaw, billingEvmConfig.tokenDecimals),
-              maxBnbAmount: formatAmount(preparedContext.bnbForSwapMaxRaw, 18, 8),
-            };
-          } catch (e: any) {
-            return failBilling("swap", `BNB to ${billingEvmConfig.tokenSymbol} swap failed: ${e.message}`);
-          }
         }
-
-        if (preparedContext.nftApprovalRequired) {
-          try {
-            const approveTx = await tokenContract.approve(
-              preparedContext.selectedEligibleNft.contractAddress,
-              preparedContext.oswapForNftRaw,
-            );
-            const receipt = await approveTx.wait();
-            billingTransactions!.nftApproval = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
-            };
-          } catch (e: any) {
-            return failBilling("nftApproval", `NFT approval failed: ${e.message}`);
-          }
-        }
-
-        if (preparedContext.oswapForNftRaw > 0n) {
-          try {
-            const mintTx = await nftContract.stake(preparedContext.oswapForNftRaw);
-            const receipt = await mintTx.wait();
-            billingTransactions!.nftMint = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
-            };
-          } catch (e: any) {
-            return failBilling("nftMint", `NFT mint failed: ${e.message}`);
-          }
-        }
-
-        if (preparedContext.vaultApprovalRequired) {
-          try {
-            const approveTx = await tokenContract.approve(
-              billingEvmConfig.vaultAddress,
-              preparedContext.oswapForInitialVaultCreditRaw,
-            );
-            const receipt = await approveTx.wait();
-            billingTransactions!.vaultApproval = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-            };
-          } catch (e: any) {
-            return failBilling("vaultApproval", `Vault approval failed: ${e.message}`);
-          }
-        }
-
-        if (preparedContext.oswapForInitialVaultCreditRaw > 0n) {
-          try {
-            const depositTx = await vaultContract.deposit(
-              activeBillingWallet.address,
-              preparedContext.oswapForInitialVaultCreditRaw,
-            );
-            const receipt = await depositTx.wait();
-            const indexedBalance = await waitForVaultCredit(
-              activeBillingWallet,
-              preparedContext.existingVaultCreditRaw + preparedContext.oswapForInitialVaultCreditRaw,
-            );
-            billingTransactions!.vaultDeposit = {
-              ok: true,
-              skipped: false,
-              txHash: receipt.hash,
-              amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-              indexedAvailableBalance: formatAmount(indexedBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
-            };
-          } catch (e: any) {
-            return failBilling("vaultDeposit", `Vault deposit failed: ${e.message}`);
-          }
-        }
-
-        billingHeaders = await buildBillingHeaders(activeBillingWallet);
       }
 
       // Step 1: Create agent (fatal if fails)
