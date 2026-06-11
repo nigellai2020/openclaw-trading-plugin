@@ -116,6 +116,30 @@ export function formatAgentDeactivationNotification(event: any): string {
   return `[Agent Deactivated] Agent ${agentLabel} has been deactivated due to ${reason}.${source}`;
 }
 
+export function formatBillingExpiryNotification(event: any): string {
+  if (typeof event?.message === "string" && event.message.trim()) {
+    return event.message.trim();
+  }
+
+  const agentId = event?.agent_id ?? event?.agentId;
+  const agentName = event?.agent_name ?? event?.agentName ?? "Unknown Agent";
+  const agentLabel = agentId != null
+    ? `${agentName} (ID: ${agentId})`
+    : agentName;
+  const secondsLeft = typeof event?.seconds_left === "number"
+    ? event.seconds_left
+    : Number(event?.seconds_left);
+  const renewalAt = typeof event?.renewal_at === "number"
+    ? new Date(event.renewal_at * 1000).toISOString()
+    : null;
+
+  if (Number.isFinite(secondsLeft) && renewalAt) {
+    return `[Billing Reminder] Agent ${agentLabel} billing expires in ${secondsLeft} seconds (${renewalAt}).`;
+  }
+
+  return `[Billing Reminder] Agent ${agentLabel} billing is close to expiry.`;
+}
+
 function readTelegramConfig(): { botToken: string | null; chatId: string | null } {
   const openclawDir = path.join(os.homedir(), ".openclaw");
   let botToken: string | null = null;
