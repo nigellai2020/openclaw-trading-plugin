@@ -7,6 +7,41 @@ function escapeHtml(s: string): string {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function formatAgentLabel(agentName: unknown, agentId: unknown): string {
+  const name = typeof agentName === "string" && agentName.trim() ? agentName.trim() : "Unknown agent";
+  return agentId != null ? `${name} (Agent ${agentId})` : name;
+}
+
+function formatPrice(value: unknown): string {
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? `$${num.toFixed(4)}` : String(value ?? "N/A");
+}
+
+function formatShortTimestamp(epochSeconds: unknown): string | null {
+  const seconds = typeof epochSeconds === "number" ? epochSeconds : Number(epochSeconds);
+  if (!Number.isFinite(seconds)) return null;
+  return `${new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(new Date(seconds * 1000))} UTC`;
+}
+
+function formatRelativeDuration(totalSeconds: number): string {
+  if (totalSeconds <= 0) return "now";
+  if (totalSeconds < 60) return "less than a minute";
+  if (totalSeconds < 3600) {
+    const minutes = Math.round(totalSeconds / 60);
+    return `about ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+  if (totalSeconds < 86400) {
+    const hours = Math.round(totalSeconds / 3600);
+    return `about ${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  const days = Math.round(totalSeconds / 86400);
+  return `about ${days} day${days === 1 ? "" : "s"}`;
+}
+
 export function formatBacktestSummary(event: any): string[] {
   const { scheduled_at, agents } = event;
   if (!Array.isArray(agents) || agents.length === 0) return [];
@@ -30,7 +65,7 @@ export function formatBacktestSummary(event: any): string[] {
     .sort((a: any, b: any) => String(a.agent_name || "").localeCompare(String(b.agent_name || "")));
   const ordered = [...withTrades, ...noTrades];
 
-  const header = `<b>[Auto Backtest Summary] ${escapeHtml(scheduled_at)}</b>`;
+  const header = `<b>Backtest summary for ${escapeHtml(scheduled_at)}</b>`;
   const blocks = ordered.map((a: any) => {
     const periods = a.periods || [];
     const name = escapeHtml(a.agent_name || "Unknown Agent");
@@ -38,9 +73,9 @@ export function formatBacktestSummary(event: any): string[] {
     for (const p of periods) {
       const period = `<b>${escapeHtml(p.period)}</b>`;
       if (hasMetrics(p)) {
-        lines.push(`  ${period}: Ret ${fmt(p.total_return)}, DD ${fmt(p.max_drawdown)}, WR ${fmt(p.win_rate)}`);
+        lines.push(`  ${period}: Return ${fmt(p.total_return)}, Max drawdown ${fmt(p.max_drawdown)}, Win rate ${fmt(p.win_rate)}`);
       } else {
-        lines.push(`  ${period}: no trade`);
+        lines.push(`  ${period}: No trades in this period`);
       }
     }
     return lines.join("\n");
@@ -76,23 +111,20 @@ export function formatFillNotification(event: any): string {
     success,
     pnl,
   } = event;
-  const agentDisplayName = agent_name || "Unknown Agent";
-  const agentLabel = typeof agent_id === "number"
-    ? `${agentDisplayName} (ID: ${agent_id})`
-    : agentDisplayName;
+  const agentLabel = formatAgentLabel(agent_name, agent_id);
   const isSuccess = typeof success === "boolean" ? success : true;
+  const sideLabel = String(side ?? "unknown").toUpperCase();
+  const symbolLabel = String(symbol ?? "Unknown Symbol").toUpperCase();
   if (!isSuccess) {
-    return `[Trade Failed] Agent ${agentLabel}: ${String(symbol ?? "Unknown Symbol").toUpperCase()} ${String(side ?? "UNKNOWN").toUpperCase()} execution failed`;
+    return `[Trade update] ${agentLabel} could not execute a ${sideLabel} order for ${symbolLabel}.`;
   }
 
-  const action = is_entry ? "Opened" : "Closed";
-  const sideLabel = String(side ?? "UNKNOWN").toUpperCase();
-  const symbolLabel = String(symbol ?? "Unknown Symbol").toUpperCase();
+  const action = is_entry ? "opened" : "closed";
   const pnlValue = typeof pnl === "number" ? pnl : Number(pnl);
   const pnlSuffix = !is_entry && Number.isFinite(pnlValue)
-    ? ` | PnL: ${pnlValue >= 0 ? "+" : ""}$${pnlValue.toFixed(4)}`
+    ? ` Realized PnL: ${pnlValue >= 0 ? "+" : ""}$${pnlValue.toFixed(4)}.`
     : "";
-  return `[Trade Executed] Agent ${agentLabel}: ${action} ${sideLabel} ${base_amount} ${symbolLabel} @ $${execution_price}${pnlSuffix}`;
+  return `[Trade update] ${agentLabel} ${action} a ${sideLabel} trade for ${base_amount} ${symbolLabel} at ${formatPrice(execution_price)}.${pnlSuffix}`;
 }
 
 export function formatAgentDeactivationNotification(event: any): string {
@@ -102,18 +134,16 @@ export function formatAgentDeactivationNotification(event: any): string {
 
   const agentId = event?.agent_id ?? event?.agentId;
   const agentName = event?.agent_name ?? event?.agentName ?? "Unknown Agent";
-  const agentLabel = agentId != null
-    ? `${agentName} (ID: ${agentId})`
-    : agentName;
+  const agentLabel = formatAgentLabel(agentName, agentId);
   const rawReason = typeof event?.reason === "string" ? event.reason : "";
   const reason = rawReason === "consecutive_order_failures"
     ? "consecutive order failures"
     : rawReason.replace(/_/g, " ") || "an incident";
   const source = typeof event?.source === "string" && event.source.trim()
-    ? ` Source: ${event.source.trim()}.`
+    ? ` Reported by ${event.source.trim()}.`
     : "";
 
-  return `[Agent Deactivated] Agent ${agentLabel} has been deactivated due to ${reason}.${source}`;
+  return `[Agent update] ${agentLabel} was deactivated after ${reason}.${source}`;
 }
 
 export function formatBillingExpiryNotification(event: any): string {
@@ -123,21 +153,29 @@ export function formatBillingExpiryNotification(event: any): string {
 
   const agentId = event?.agent_id ?? event?.agentId;
   const agentName = event?.agent_name ?? event?.agentName ?? "Unknown Agent";
-  const agentLabel = agentId != null
-    ? `${agentName} (ID: ${agentId})`
-    : agentName;
+  const agentLabel = formatAgentLabel(agentName, agentId);
   const secondsLeft = typeof event?.seconds_left === "number"
     ? event.seconds_left
     : Number(event?.seconds_left);
-  const renewalAt = typeof event?.renewal_at === "number"
-    ? new Date(event.renewal_at * 1000).toISOString()
-    : null;
+  const renewalAt = formatShortTimestamp(event?.renewal_at);
+  const isExpiredEvent = event?.event === "agent_billing_expired";
 
   if (Number.isFinite(secondsLeft) && renewalAt) {
-    return `[Billing Reminder] Agent ${agentLabel} billing expires in ${secondsLeft} seconds (${renewalAt}).`;
+    if (isExpiredEvent || secondsLeft <= 0) {
+      return `[Billing update] ${agentLabel} billing expired at ${renewalAt}.`;
+    }
+    return `[Billing reminder] ${agentLabel} billing renews in ${formatRelativeDuration(secondsLeft)}, at ${renewalAt}.`;
   }
 
-  return `[Billing Reminder] Agent ${agentLabel} billing is close to expiry.`;
+  if (renewalAt) {
+    return isExpiredEvent
+      ? `[Billing update] ${agentLabel} billing expired at ${renewalAt}.`
+      : `[Billing reminder] ${agentLabel} billing is due soon, around ${renewalAt}.`;
+  }
+
+  return isExpiredEvent
+    ? `[Billing update] ${agentLabel} billing has expired.`
+    : `[Billing reminder] ${agentLabel} billing is due soon.`;
 }
 
 function readTelegramConfig(): { botToken: string | null; chatId: string | null } {
