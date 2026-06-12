@@ -9,7 +9,7 @@ Follow these steps to create a paper or live trading agent. This skill covers bo
 
 **Copy-agent path:** If the user wants to copy, follow, or duplicate an existing agent, that is handled by this same skill. When in copy mode, Steps 1–4 are the same, Step 5 (Build strategy) is **skipped**, and the `copiedFromAgentId` is passed to `prepare_agent_creation` and `deploy_agent` instead of a strategy object.
 
-**Scope boundary:** This skill is for new agent creation only. If the user wants to top up billing for an existing agent before expiry, switch to the `manage-agents` skill and use `prepare_agent_billing_renewal` followed by `renew_agent_billing` after the user funds the billing wallet.
+**Scope boundary:** This skill is for new agent creation only. If the user wants to add billing vault credit for an existing agent or reactivate an expired agent, switch to the `manage-agents` skill and use `prepare_agent_vault_credit_top_up` / `top_up_agent_vault_credit` for top-ups or `reactivate_expired_agent` for expired-agent recovery.
 
 **Session constraint (strict):** All plugin tool calls in this workflow (`init_trading_session`, `setup_live_wallet`, `search_public_agents`, `prepare_agent_creation`, `deploy_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
 
@@ -296,8 +296,8 @@ Handle the response:
   - vault deposit made and updated vault credit
   - fee breakdown reused from the preflight checkout
   - next billing date estimate
-  - remind the user that future top-ups for this same agent use `prepare_agent_billing_renewal` and `renew_agent_billing`
-  - remind the user that there should be at least `billing.result.feeBreakdown.firstBillingAmount` OSWAP in the billing wallet by `billing.result.nextBillingDateEstimate` for auto renewal
+  - remind the user that future credit additions for this same agent use `prepare_agent_vault_credit_top_up` and `top_up_agent_vault_credit`
+  - remind the user that there should be at least `billing.result.feeBreakdown.firstBillingAmount` OSWAP worth of available vault credit by `billing.result.nextBillingDateEstimate` for automatic billing
   - include any warning returned in `billing.result.warning`
 - **log.ok = false**: Warn but continue (action log is non-critical).
 - Present: agent ID, name, pair, capital, and `create.agentUrl`.

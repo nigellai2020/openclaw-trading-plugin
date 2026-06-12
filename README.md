@@ -100,6 +100,10 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/openclaw
 | `prepare_agent_creation`  | Preflight for direct or copy-agent creation — summarize billing, NFT, or vault setup. Pass `copiedFromAgentId` to preflight a copy agent |
 | `setup_live_wallet`       | Store agent wallet key in TEE and register in backend                       |
 | `deploy_agent`            | Create agent (direct or copy), run billing setup, notify bot, register trader (live), log action, verify. Pass `copiedFromAgentId` to create a copy agent |
+| `get_billing_subscriptions` | List billing subscriptions for the billing wallet derived from the configured Nostr key |
+| `prepare_agent_vault_credit_top_up` | Read-only preflight for adding billing vault credit to an existing agent |
+| `top_up_agent_vault_credit` | Execute the BNB→OSWAP→vault deposit flow to add billing vault credit to an existing agent |
+| `reactivate_expired_agent` | Reactivate an expired agent when vault credit is already sufficient; otherwise explain the required top-up |
 | `get_agent`               | Get agent details by ID                                                     |
 | `update_agent`            | Update only the requested agent fields across the supported backends. Pass `copiedFromAgentId` to switch the source agent being followed |
 | `get_hyperliquid_balance` | Get USDC balance of a Hyperliquid master wallet                             |
@@ -121,7 +125,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/openclaw
 | Skill                | Description                              |
 | -------------------- | ---------------------------------------- |
 | `trade`              | Guided workflow for creating new paper, live, or copy agents |
-| `manage-agents`      | Guided workflow for listing, updating, and deleting agents |
+| `manage-agents`      | Guided workflow for listing, updating, topping up billing vault credit, reactivating expired agents, and deleting agents |
 | `manage-wallets`     | Guided workflow for listing, updating, and deleting wallets |
 | `market-data`        | Guided workflow for current token prices and historical market data |
 | `backtest`           | Guided workflow for running backtests    |
