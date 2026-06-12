@@ -325,7 +325,7 @@ async function executeBillingFundingTransactions(input: {
   return await buildBillingHeaders(billingWallet);
 }
 
-function buildAgentRenewalPreflightResult(input: {
+function buildAgentBillingTopUpPreflightResult(input: {
   agentId: number;
   agentProfile: any;
   preparedContext: PreparedAgentCreationContext;
@@ -341,7 +341,7 @@ function buildAgentRenewalPreflightResult(input: {
 
   const actions = prepared.executionPlan.actions
     .filter((action) => !action.startsWith("Create "))
-    .concat(`Renew billing credit for agent "${agentProfile?.name ?? prepared.executionPlan.agentName}"${symbol ? ` (${symbol})` : ""}.`);
+    .concat(`Add billing vault credit for agent "${agentProfile?.name ?? prepared.executionPlan.agentName}"${symbol ? ` (${symbol})` : ""}.`);
 
   return {
     ...prepared,
@@ -363,17 +363,17 @@ function buildAgentRenewalPreflightResult(input: {
       symbol,
       actions,
     },
-    renewal: {
+    billingTopUp: {
       agentId,
       nextBillingDateEstimate: nextRenewalAt ?? prepared.subscription?.estimatedEndTime ?? null,
       subscriptionMatched: nextRenewalAt != null,
     },
     confirmationRequired: true,
-    nextStep: "present_renewal_checkout_and_wait_for_explicit_confirmation",
+    nextStep: "present_vault_credit_top_up_checkout_and_wait_for_explicit_confirmation",
   };
 }
 
-async function loadAgentRenewalContext(input: {
+async function loadAgentBillingTopUpContext(input: {
   agentId: number;
   npub: string;
   publicKey: string;
@@ -907,20 +907,20 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
   });
 
   api.registerTool({
-    name: "prepare_agent_billing_renewal",
-    description: "Read-only preflight for renewing billing credit for an existing agent. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is ready, calculates the OSWAP top-up and BNB required for the next renewal period, and returns funding instructions before any on-chain transaction. OpenClaw must present this result to the user and wait for explicit confirmation or funding completion before calling renew_agent_billing.",
+    name: "prepare_agent_vault_credit_top_up",
+    description: "Read-only preflight for adding billing vault credit to an existing agent. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is ready, calculates any OSWAP top-up and BNB needed, and returns funding instructions before any on-chain transaction. This tool does not renew or reactivate an agent by itself. OpenClaw must present this result to the user and wait for explicit confirmation or funding completion before calling top_up_agent_vault_credit.",
     parameters: Type.Object({
-      agentId: Type.Number({ description: "Agent ID to renew billing for" }),
+      agentId: Type.Number({ description: "Agent ID whose billing vault credit should be increased" }),
     }),
     async execute(_id: string, params: { agentId: number }) {
       const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
-      debugLog("prepare_agent_billing_renewal", "entry", {
+      debugLog("prepare_agent_vault_credit_top_up", "entry", {
         agentId: params.agentId,
         usesNostrPrivateKey: true,
       });
 
       try {
-        const { agentProfile, preparedContext, nextRenewalAt } = await loadAgentRenewalContext({
+        const { agentProfile, preparedContext, nextRenewalAt } = await loadAgentBillingTopUpContext({
           agentId: params.agentId,
           npub,
           publicKey,
@@ -929,13 +929,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           prepareAgentCreationContext,
           fetchBillingSubscriptionsSnapshot,
         });
-        const result = buildAgentRenewalPreflightResult({
+        const result = buildAgentBillingTopUpPreflightResult({
           agentId: params.agentId,
           agentProfile,
           preparedContext,
           nextRenewalAt,
         });
-        debugLog("prepare_agent_billing_renewal", "result", result);
+        debugLog("prepare_agent_vault_credit_top_up", "result", result);
         return textResult(result);
       } catch (e: any) {
         return textResult({ error: e.message, agentId: params.agentId });
@@ -944,15 +944,15 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
   });
 
   api.registerTool({
-    name: "renew_agent_billing",
-    description: "Execute the billing renewal funding flow for an existing agent after the user has topped up BNB in the billing wallet. Reuses the same swap, approval, and vault deposit logic as deploy_agent, but does not create or update the agent itself. Call this tool directly from the current session only after explicit user confirmation.",
+    name: "top_up_agent_vault_credit",
+    description: "Execute the billing vault-credit top-up flow for an existing agent after the user has topped up BNB in the billing wallet. Reuses the same swap, approval, and vault deposit logic as deploy_agent, but does not create, renew, or reactivate the agent itself. Call this tool directly from the current session only after explicit user confirmation.",
     parameters: Type.Object({
-      agentId: Type.Number({ description: "Agent ID to renew billing for" }),
+      agentId: Type.Number({ description: "Agent ID whose billing vault credit should be increased" }),
     }),
     async execute(_id: string, params: { agentId: number }) {
       const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
       const result: Record<string, unknown> = {
-        renewal: {
+        billingTopUp: {
           agentId: params.agentId,
         },
       };
@@ -961,7 +961,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       let preparedContext: PreparedAgentCreationContext;
       let nextRenewalAt: string | null = null;
       try {
-        const loaded = await loadAgentRenewalContext({
+        const loaded = await loadAgentBillingTopUpContext({
           agentId: params.agentId,
           npub,
           publicKey,
@@ -977,7 +977,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         return textResult({ error: e.message, ...result });
       }
 
-      const preflight = buildAgentRenewalPreflightResult({
+      const preflight = buildAgentBillingTopUpPreflightResult({
         agentId: params.agentId,
         agentProfile,
         preparedContext,
@@ -1061,8 +1061,138 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         };
       }
 
-      debugLog("renew_agent_billing", "result", result);
+      debugLog("top_up_agent_vault_credit", "result", result);
       return textResult(result);
+    },
+  });
+
+  api.registerTool({
+    name: "reactivate_expired_agent",
+    description: "Reactivate an expired agent only when the current billing vault credit is already sufficient. If vault credit is short, this tool explains how much BNB to fund into the billing wallet and points the user to the vault-credit top-up flow before retrying reactivation.",
+    parameters: Type.Object({
+      agentId: Type.Number({ description: "Expired agent ID to reactivate" }),
+    }),
+    async execute(_id: string, params: { agentId: number }) {
+      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
+      const auth = getAuthHeader(publicKey, privateKey);
+      const result: Record<string, unknown> = {
+        reactivation: {
+          agentId: params.agentId,
+        },
+      };
+
+      let agentProfile: any;
+      let preparedContext: PreparedAgentCreationContext;
+      let nextRenewalAt: string | null = null;
+      try {
+        const loaded = await loadAgentBillingTopUpContext({
+          agentId: params.agentId,
+          npub,
+          publicKey,
+          privateKey,
+          fetchPublicAgentProfile,
+          prepareAgentCreationContext,
+          fetchBillingSubscriptionsSnapshot,
+        });
+        agentProfile = loaded.agentProfile;
+        preparedContext = loaded.preparedContext;
+        nextRenewalAt = loaded.nextRenewalAt;
+      } catch (e: any) {
+        return textResult({ error: e.message, ...result });
+      }
+
+      const preflight = buildAgentBillingTopUpPreflightResult({
+        agentId: params.agentId,
+        agentProfile,
+        preparedContext,
+        nextRenewalAt,
+      });
+      const activeBillingWallet = preparedContext.billingWallet;
+      result.agent = preflight.agent;
+
+      if (preparedContext.prepared.billing.required && preparedContext.oswapForInitialVaultCreditRaw > 0n) {
+        const needsFunding = preparedContext.bnbShortfallRaw > 0n;
+        return textResult({
+          error: needsFunding
+            ? `Insufficient vault credit to reactivate agent ${params.agentId}. Send only ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB to the billing wallet, then add vault credit before retrying reactivation.`
+            : `Insufficient vault credit to reactivate agent ${params.agentId}. The billing wallet is already funded enough for the top-up flow; add vault credit first, then retry reactivation.`,
+          agent: preflight.agent,
+          reactivation: {
+            agentId: params.agentId,
+            status: "insufficient_vault_credit",
+            walletAddress: activeBillingWallet?.address,
+            currentVaultCredit: preflight.fees.existingVaultCredit,
+            requiredTopUp: preflight.fees.oswapForInitialVaultCredit,
+            nextBillingDateEstimate: preflight.billingTopUp?.nextBillingDateEstimate ?? null,
+            depositNetwork: preflight.wallet.networkLabel,
+            bnbShortfall: preflight.funding?.bnbShortfall ?? null,
+            nextStep: needsFunding
+              ? "fund_billing_wallet_then_run_top_up_agent_vault_credit"
+              : "run_top_up_agent_vault_credit",
+            recommendedTools: {
+              preflight: "prepare_agent_vault_credit_top_up",
+              execute: "top_up_agent_vault_credit",
+            },
+          },
+          billingShortfall: buildBillingBreakdown(preparedContext, billingEvmConfig),
+        });
+      }
+
+      try {
+        const res = await fetch(`${baseUrl}/api/agent/${params.agentId}/reactivate`, {
+          method: "POST",
+          headers: { Authorization: auth },
+          body: JSON.stringify({}),
+        });
+        const body = await parseResponseBody(res);
+        if (!res.ok) {
+          return textResult({
+            error: `reactivate_expired_agent failed: ${res.status} ${responseErrorMessage(body)}`,
+            agent: preflight.agent,
+            reactivation: {
+              agentId: params.agentId,
+              status: "failed",
+              walletAddress: activeBillingWallet?.address,
+              currentVaultCredit: preflight.fees.existingVaultCredit,
+              nextBillingDateEstimate: preflight.billingTopUp?.nextBillingDateEstimate ?? null,
+            },
+          });
+        }
+
+        const responseData = body?.data ?? body;
+        let updatedVaultCredit: string | undefined;
+        let warning: string | undefined;
+        if (activeBillingWallet) {
+          try {
+            const postBalance = await fetchBillingBalanceSnapshot(activeBillingWallet);
+            updatedVaultCredit = formatAmount(postBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals);
+          } catch (e: any) {
+            warning = e?.message;
+          }
+        }
+
+        const successResult = {
+          agent: preflight.agent,
+          reactivation: {
+            agentId: params.agentId,
+            status: "reactivated",
+            walletAddress: activeBillingWallet?.address,
+            currentVaultCredit: preflight.fees.existingVaultCredit,
+            updatedVaultCredit,
+            nextBillingDateEstimate: responseData?.next_renewal_at ?? preflight.billingTopUp?.nextBillingDateEstimate ?? null,
+            response: responseData,
+            ...(warning ? { warning } : {}),
+          },
+        };
+        debugLog("reactivate_expired_agent", "result", successResult);
+        return textResult(successResult);
+      } catch (e: any) {
+        return textResult({
+          error: e.message,
+          agent: preflight.agent,
+          ...result,
+        });
+      }
     },
   });
 

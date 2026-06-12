@@ -1,11 +1,11 @@
 ---
 name: manage-agents
-description: List, update, renew billing for, or delete trading agents. Use when the user wants to see their agents, change agent settings, top up billing before expiry, remove an agent, or clean up old agents.
+description: List, update, add billing vault credit for, reactivate, or delete trading agents. Use when the user wants to see their agents, change agent settings, top up billing credit, reactivate an expired agent, remove an agent, or clean up old agents.
 ---
 
 # Manage Trading Agents
 
-**Session constraint (strict):** All plugin tool calls in this workflow (`list_my_agents`, `get_billing_subscriptions`, `prepare_agent_billing_renewal`, `renew_agent_billing`, `get_agent`, `update_agent`, `delete_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
+**Session constraint (strict):** All plugin tool calls in this workflow (`list_my_agents`, `get_billing_subscriptions`, `prepare_agent_vault_credit_top_up`, `top_up_agent_vault_credit`, `reactivate_expired_agent`, `get_agent`, `update_agent`, `delete_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
 
 ## List agents
 Call `list_my_agents`. Optional filters: `mode` ("live"/"paper"), `marketType` ("spot"/"perp"), `page`, `pageSize`.
@@ -13,17 +13,26 @@ Call `list_my_agents`. Optional filters: `mode` ("live"/"paper"), `marketType` (
 Present results as a table: ID, name, pair, mode, market type, initial capital, current value, P&L, status.
 
 ## Billing subscriptions
-If the user asks about billing subscriptions, renewal status, or next billing dates, call `get_billing_subscriptions` and summarize the active subscriptions for the current billing wallet.
+If the user asks about billing subscriptions, vault credit, renewal status, or next billing dates, call `get_billing_subscriptions` and summarize the active subscriptions for the current billing wallet.
 
-## Renew billing before expiry
+## Top up billing vault credit
 1. If the user has not specified an agent ID, call `list_my_agents` first and ask which agent needs a billing top-up.
-2. Call `prepare_agent_billing_renewal` with the `agentId`. This is a read-only preflight. Do not call `renew_agent_billing` in the same turn as the preflight.
+2. Call `prepare_agent_vault_credit_top_up` with the `agentId`. This is a read-only preflight. Do not call `top_up_agent_vault_credit` in the same turn as the preflight.
 3. Present the result in plain language. Always show the full billing wallet address when the user needs to fund it. Never abbreviate `0x...`.
 4. If `fees.oswapShortfall > 0`, instruct the user to send only the missing `funding.bnbShortfall` amount of BNB to the billing wallet. Do not ask the user to source OSWAP separately unless they explicitly ask for the manual path.
 5. If `funding.bnbShortfall = 0`, tell the user the billing wallet is already funded and ask for explicit confirmation before continuing.
-6. Wait for an explicit reply such as `done`, `confirm`, or `proceed` after funding. The original renewal request does not count as confirmation.
-7. Call `renew_agent_billing` with the same `agentId`.
-8. Report the result as a billing-renewal receipt: wallet used, swap/approval/deposit transaction results, updated vault credit, and next billing date estimate. Include any warning returned in `billing.result.warning`.
+6. Wait for an explicit reply such as `done`, `confirm`, or `proceed` after funding. The original top-up request does not count as confirmation.
+7. Call `top_up_agent_vault_credit` with the same `agentId`.
+8. Report the result as a billing-vault-credit receipt: wallet used, swap/approval/deposit transaction results, updated vault credit, and next billing date estimate. Include any warning returned in `billing.result.warning`.
+
+## Reactivate expired agent
+1. If the user has not specified an agent ID, call `list_my_agents` first and ask which expired agent should be reactivated.
+2. Call `reactivate_expired_agent` with the `agentId`.
+3. If the tool returns `reactivation.status = "insufficient_vault_credit"`, explain that reactivation cannot proceed yet because the billing vault credit is too low.
+4. Always show the full billing wallet address when the tool asks the user to fund it.
+5. If `reactivation.bnbShortfall` is non-zero, tell the user to fund only that missing BNB amount, then use `prepare_agent_vault_credit_top_up` and `top_up_agent_vault_credit` before retrying `reactivate_expired_agent`.
+6. If `reactivation.bnbShortfall` is zero, tell the user the billing wallet is already funded enough for the top-up flow; they only need to run the vault-credit top-up before retrying reactivation.
+7. If the tool returns `reactivation.status = "reactivated"`, report the reactivation result, updated vault credit if available, and the next billing date estimate.
 
 ## Update an agent
 1. If the user has not specified an agent ID, call `list_my_agents` first and ask which agent to update.
