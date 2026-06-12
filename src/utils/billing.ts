@@ -1,21 +1,5 @@
 import { formatUnits, parseUnits } from "ethers";
 import { resolveBillingStageParams } from "../billing-stage.js";
-import {
-  DEFAULT_BILLING_POLL_INTERVAL_MS,
-  DEFAULT_BILLING_POLL_TIMEOUT_MS,
-  DEFAULT_BILLING_SWAP_SLIPPAGE_BPS,
-  DEFAULT_BSC_BILLING_RPC_URL,
-  DEFAULT_BSC_ROUTER_ADDRESS,
-  DEFAULT_BSC_VAULT_ADDRESS,
-  DEFAULT_BSC_WETH_ADDRESS,
-  DEFAULT_ELIGIBLE_NFT_ADDRESS,
-  DEFAULT_ELIGIBLE_NFT_EXPLORER_URL,
-  DEFAULT_ELIGIBLE_NFT_MINIMUM_STAKE,
-  DEFAULT_ELIGIBLE_NFT_NAME,
-  DEFAULT_ELIGIBLE_NFT_PROTOCOL_FEE,
-  DEFAULT_ELIGIBLE_NFT_TOTAL_MINTING_FEE,
-  DEFAULT_OSWAP_TOKEN_ADDRESS,
-} from "../constants/trading.js";
 import type { BillingEvmConfig, GasEstimateSummary } from "../types/billing.js";
 
 export function normalizeHexPrivateKey(privateKey: string): string {
@@ -70,25 +54,26 @@ export function sanitizeForLog(data: unknown): unknown {
 
 export function buildBillingEvmConfig(pluginConfig: any): BillingEvmConfig {
   const stage = resolveBillingStageParams(pluginConfig.billingEnvironment);
+  // Billing defaults come from openclaw.plugin.json so config stays the single source of truth.
   return {
     environment: stage.environment,
     networkLabel: stage.networkLabel,
-    rpcUrl: pluginConfig.bscBillingRpcUrl ?? DEFAULT_BSC_BILLING_RPC_URL,
-    routerAddress: pluginConfig.bscBillingRouterAddress ?? DEFAULT_BSC_ROUTER_ADDRESS,
-    wethAddress: pluginConfig.bscBillingWethAddress ?? DEFAULT_BSC_WETH_ADDRESS,
-    tokenAddress: pluginConfig.bscBillingTokenAddress ?? DEFAULT_OSWAP_TOKEN_ADDRESS,
-    tokenSymbol: pluginConfig.bscBillingTokenSymbol ?? "OSWAP",
-    tokenDecimals: pluginConfig.bscBillingTokenDecimals ?? 18,
-    vaultAddress: pluginConfig.bscBillingVaultAddress ?? DEFAULT_BSC_VAULT_ADDRESS,
-    eligibleNftAddress: pluginConfig.bscEligibleNftAddress ?? DEFAULT_ELIGIBLE_NFT_ADDRESS,
-    eligibleNftExplorerUrl: pluginConfig.bscEligibleNftExplorerUrl ?? DEFAULT_ELIGIBLE_NFT_EXPLORER_URL,
-    eligibleNftName: pluginConfig.bscEligibleNftName ?? DEFAULT_ELIGIBLE_NFT_NAME,
-    eligibleNftMinimumStake: pluginConfig.bscEligibleNftMinimumStake ?? DEFAULT_ELIGIBLE_NFT_MINIMUM_STAKE,
-    eligibleNftProtocolFee: pluginConfig.bscEligibleNftProtocolFee ?? DEFAULT_ELIGIBLE_NFT_PROTOCOL_FEE,
-    eligibleNftTotalMintingFee: pluginConfig.bscEligibleNftTotalMintingFee ?? DEFAULT_ELIGIBLE_NFT_TOTAL_MINTING_FEE,
-    swapSlippageBps: pluginConfig.billingSwapSlippageBps ?? DEFAULT_BILLING_SWAP_SLIPPAGE_BPS,
-    balancePollIntervalMs: pluginConfig.billingPollIntervalMs ?? DEFAULT_BILLING_POLL_INTERVAL_MS,
-    balancePollTimeoutMs: pluginConfig.billingPollTimeoutMs ?? DEFAULT_BILLING_POLL_TIMEOUT_MS,
+    rpcUrl: pluginConfig.bscBillingRpcUrl,
+    routerAddress: pluginConfig.bscBillingRouterAddress,
+    wethAddress: pluginConfig.bscBillingWethAddress,
+    tokenAddress: pluginConfig.bscBillingTokenAddress,
+    tokenSymbol: pluginConfig.bscBillingTokenSymbol,
+    tokenDecimals: pluginConfig.bscBillingTokenDecimals,
+    vaultAddress: pluginConfig.bscBillingVaultAddress,
+    eligibleNftAddress: pluginConfig.bscEligibleNftAddress,
+    eligibleNftExplorerUrl: pluginConfig.bscEligibleNftExplorerUrl,
+    eligibleNftName: pluginConfig.bscEligibleNftName,
+    eligibleNftMinimumStake: pluginConfig.bscEligibleNftMinimumStake,
+    eligibleNftProtocolFee: pluginConfig.bscEligibleNftProtocolFee,
+    eligibleNftTotalMintingFee: pluginConfig.bscEligibleNftTotalMintingFee,
+    swapSlippageBps: pluginConfig.billingSwapSlippageBps,
+    balancePollIntervalMs: pluginConfig.billingPollIntervalMs,
+    balancePollTimeoutMs: pluginConfig.billingPollTimeoutMs,
   };
 }
 

@@ -4,14 +4,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-  DEFAULT_BASE_URL,
-  DEFAULT_ELIGIBLE_NFT_NAME,
   DEFAULT_FALLBACK_APPROVE_GAS,
   DEFAULT_FALLBACK_NFT_STAKE_GAS,
   DEFAULT_FALLBACK_SWAP_GAS,
   DEFAULT_FALLBACK_VAULT_DEPOSIT_GAS,
-  DEFAULT_SETTLEMENT_ENGINE_URL,
-  DEFAULT_WALLET_AGENT_URL,
   ERC20_ABI,
   NFT_ABI,
   ROUTER_ABI,
@@ -43,9 +39,10 @@ import {
 
 export function createToolsContext(api: any) {
   const pluginConfig = api.config?.plugins?.entries?.["trading-plugin"]?.config ?? api.config ?? {};
-  const baseUrl: string = pluginConfig.baseUrl ?? DEFAULT_BASE_URL;
-  const walletAgentUrl: string = pluginConfig.walletAgentUrl ?? DEFAULT_WALLET_AGENT_URL;
-  const settlementEngineUrl: string = pluginConfig.settlementEngineUrl ?? DEFAULT_SETTLEMENT_ENGINE_URL;
+  // Defaults for these values live in openclaw.plugin.json; avoid mirroring them in code.
+  const baseUrl: string = pluginConfig.baseUrl;
+  const walletAgentUrl: string = pluginConfig.walletAgentUrl;
+  const settlementEngineUrl: string = pluginConfig.settlementEngineUrl;
   const enableAmmSpot: boolean = pluginConfig.enableAmmSpot === true;
   const billingEvmConfig = buildBillingEvmConfig(pluginConfig);
   const billingProvider = new JsonRpcProvider(billingEvmConfig.rpcUrl);
@@ -472,7 +469,7 @@ export function createToolsContext(api: any) {
       }
 
       const totalMintingFeeRaw = minimumStakeRaw + protocolFeeRaw;
-      const name = rawName || `${DEFAULT_ELIGIBLE_NFT_NAME} ${entryId}`;
+      const name = rawName || `${billingEvmConfig.eligibleNftName} ${entryId}`;
       return {
         id: entryId,
         name,

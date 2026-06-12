@@ -19,7 +19,7 @@ export function registerNostrNotifications(
   const privateKey: string | undefined = pluginConfig.nostrPrivateKey;
   if (!privateKey) return;
 
-  const relayUrl: string = pluginConfig.nostrRelayUrl ?? "wss://nos.lol";
+  const relayUrl: string = pluginConfig.nostrRelayUrl;
   const ownPublicKey = Keys.getPublicKey(privateKey);
   const sendNotification = createTelegramNotifier();
 
