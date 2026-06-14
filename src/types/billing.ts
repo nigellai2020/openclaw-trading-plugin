@@ -1,8 +1,6 @@
 import type { Wallet } from "ethers";
-import type { BillingEnvironment } from "../billing-stage.js";
 
 export type BillingEvmConfig = {
-  environment: BillingEnvironment;
   networkLabel: string;
   rpcUrl: string;
   routerAddress: string;

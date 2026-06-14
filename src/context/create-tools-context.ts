@@ -1,5 +1,6 @@
 import { Keys, Nip19, Signer } from "@scom/scom-signer";
 import { Contract, JsonRpcProvider, Wallet, getAddress } from "ethers";
+import { assertBillingNetworkConsistent } from "../billing-stage.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -14,7 +15,6 @@ import {
   VAULT_ABI,
 } from "../constants/trading.js";
 import type {
-  BillingEvmConfig,
   EligibleNftConfig,
   EthHeaders,
   PreparedAgentCreationContext,
@@ -38,13 +38,24 @@ import {
 } from "../utils/billing.js";
 
 export function createToolsContext(api: any) {
-  const pluginConfig = api.config?.plugins?.entries?.["trading-plugin"]?.config ?? api.config ?? {};
+  // api.pluginConfig is the user's config merged with the openclaw.plugin.json defaults.
+  // Defaults (incl. the test/prod values) live in the manifest — the single source of truth;
+  // the user only sets required fields like nostrPrivateKey.
+  const pluginConfig = api.pluginConfig ?? {};
   // Defaults for these values live in openclaw.plugin.json; avoid mirroring them in code.
   const baseUrl: string = pluginConfig.baseUrl;
   const walletAgentUrl: string = pluginConfig.walletAgentUrl;
   const settlementEngineUrl: string = pluginConfig.settlementEngineUrl;
   const enableAmmSpot: boolean = pluginConfig.enableAmmSpot === true;
+  const defaultHyperliquidNetwork: string = pluginConfig.defaultHyperliquidNetwork;
+  const defaultHyperliquidChainId: 998 | 999 = defaultHyperliquidNetwork === "mainnet" ? 999 : 998;
+  const webUrl: string = pluginConfig.webUrl;
   const billingEvmConfig = buildBillingEvmConfig(pluginConfig);
+  assertBillingNetworkConsistent({
+    rpcUrl: billingEvmConfig.rpcUrl,
+    explorerUrl: billingEvmConfig.eligibleNftExplorerUrl,
+    defaultHyperliquidNetwork,
+  });
   const billingProvider = new JsonRpcProvider(billingEvmConfig.rpcUrl);
 
   const debugLogPath = path.join(os.homedir(), ".openclaw", "logs", "trading-debug.json");
@@ -734,7 +745,7 @@ export function createToolsContext(api: any) {
       bnbForSwapMaxRaw = computeAmountInMax(bnbForSwapQuotedRaw, billingEvmConfig.swapSlippageBps);
     }
 
-    const gasPriceWei = feeData.gasPrice ?? feeData.maxFeePerGas ?? 5_000_000_000n;
+    const gasPriceWei = feeData.gasPrice ?? feeData.maxFeePerGas ?? BigInt(pluginConfig.billingFallbackGasPriceWei);
     const renewalPeriodDays = Math.round(feeQuote.periodSeconds / 86_400);
     const estimatedEndTime = new Date(Date.now() + feeQuote.periodSeconds * 1_000).toISOString();
     const swapDeadline = Math.floor(Date.now() / 1000) + 1_200;
@@ -960,6 +971,9 @@ export function createToolsContext(api: any) {
     walletAgentUrl,
     settlementEngineUrl,
     enableAmmSpot,
+    defaultHyperliquidNetwork,
+    defaultHyperliquidChainId,
+    webUrl,
     billingEvmConfig,
     debugLog,
     responseErrorMessage,

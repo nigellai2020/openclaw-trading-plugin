@@ -43,6 +43,10 @@
         "type": "string",
         "default": "https://agent02.decom.dev"
       },
+      "webUrl": {
+        "type": "string",
+        "default": "https://agent.openswap.xyz"
+      },
       "nostrPrivateKey": {
         "type": "string"
       },
@@ -58,10 +62,10 @@
         "type": "boolean",
         "default": false
       },
-      "billingEnvironment": {
+      "defaultHyperliquidNetwork": {
         "type": "string",
-        "enum": ["test", "prod"],
-        "default": "test"
+        "enum": ["testnet", "mainnet"],
+        "default": "testnet"
       },
       "bscBillingRpcUrl": {
         "type": "string",
@@ -126,6 +130,10 @@
       "billingPollTimeoutMs": {
         "type": "number",
         "default": 90000
+      },
+      "billingFallbackGasPriceWei": {
+        "type": "number",
+        "default": 5000000000
       },
       "nostrRelayUrl": {
         "type": "string",

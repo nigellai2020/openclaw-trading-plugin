@@ -25,7 +25,9 @@ openclaw plugins install -l .
 
 ## 3. Configure the Plugin
 
-Edit `~/.openclaw/openclaw.json` and add the plugin config:
+Edit `~/.openclaw/openclaw.json` and add the plugin config. The only required field is
+`nostrPrivateKey`; every other setting has a default in `openclaw.plugin.json` and is applied
+automatically:
 
 ```json5
 {
@@ -33,9 +35,7 @@ Edit `~/.openclaw/openclaw.json` and add the plugin config:
     entries: {
       "trading-plugin": {
         config: {
-          billingEnvironment: "test",
           nostrPrivateKey: "${NOSTR_PRIVATE_KEY}",
-          nostrRelayUrl: "${NOSTR_RELAY_URL}", // optional, defaults to wss://nos.lol
         },
       },
     },
@@ -43,10 +43,8 @@ Edit `~/.openclaw/openclaw.json` and add the plugin config:
 }
 ```
 
-Replace the placeholders:
-
-- `${NOSTR_PRIVATE_KEY}` — your Nostr private key (hex)
-- `${NOSTR_RELAY_URL}` — optional Nostr relay URL (defaults to `wss://nos.lol`)
+Replace `${NOSTR_PRIVATE_KEY}` with your Nostr private key (hex). To override any default
+(for example a custom Nostr relay), add that key alongside it, e.g. `nostrRelayUrl: "wss://your.relay"`.
 
 The Nostr connection enables real-time trading notifications via Telegram. The plugin subscribes to NIP-04 kind-4 direct messages tagged to your derived Nostr public key and forwards supported events such as `fill_executed`, `backtest_completed`, and `agent_deactivated` to your Telegram chat.
 

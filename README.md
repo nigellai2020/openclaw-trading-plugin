@@ -52,7 +52,9 @@ openclaw gateway restart
 
 ## Configuration
 
-Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/openclaw.json`:
+The only required setting is `nostrPrivateKey`. Every other key has a default in
+`openclaw.plugin.json` and is applied automatically — set a key in your config only to
+override its default. Add the config to `~/.openclaw/openclaw.json`:
 
 ```json5
 {
@@ -60,12 +62,7 @@ Config keys defined in `openclaw.plugin.json`. Set them in `~/.openclaw/openclaw
     entries: {
       "trading-plugin": {
         config: {
-          baseUrl: "https://agent02.decom.dev",
-          tradingBotUrl: "https://trading-agent.decom.dev",
-          billingEnvironment: "test", // "test" or "prod"
           nostrPrivateKey: "${NOSTR_PRIVATE_KEY}",
-          walletAgentUrl: "https://wallet-agent.decom.dev",
-          settlementEngineUrl: "https://settlement-agent.decom.dev",
         },
       },
     },

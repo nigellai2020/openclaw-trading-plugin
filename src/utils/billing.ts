@@ -1,5 +1,5 @@
 import { formatUnits, parseUnits } from "ethers";
-import { resolveBillingStageParams } from "../billing-stage.js";
+import { resolveBnbNetworkLabel } from "../billing-stage.js";
 import type { BillingEvmConfig, GasEstimateSummary } from "../types/billing.js";
 
 export function normalizeHexPrivateKey(privateKey: string): string {
@@ -53,11 +53,10 @@ export function sanitizeForLog(data: unknown): unknown {
 }
 
 export function buildBillingEvmConfig(pluginConfig: any): BillingEvmConfig {
-  const stage = resolveBillingStageParams(pluginConfig.billingEnvironment);
   // Billing defaults come from openclaw.plugin.json so config stays the single source of truth.
+  // The network label is derived from the RPC (the chain billing actually runs on).
   return {
-    environment: stage.environment,
-    networkLabel: stage.networkLabel,
+    networkLabel: resolveBnbNetworkLabel(pluginConfig.bscBillingRpcUrl),
     rpcUrl: pluginConfig.bscBillingRpcUrl,
     routerAddress: pluginConfig.bscBillingRouterAddress,
     wethAddress: pluginConfig.bscBillingWethAddress,
@@ -85,15 +84,13 @@ export function buildExplorerUrl(templateUrl: string, configuredAddress: string,
 
   try {
     const url = new URL(templateUrl);
-    if (url.pathname.startsWith("/address/")) {
-      url.pathname = `/address/${contractAddress}`;
-      url.search = "";
-      url.hash = "";
-      return url.toString();
-    }
-  } catch {}
-
-  return `https://testnet.bscscan.com/address/${contractAddress}`;
+    url.pathname = `/address/${contractAddress}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return templateUrl;
+  }
 }
 
 export function isActiveNftConfig(value: unknown): boolean {

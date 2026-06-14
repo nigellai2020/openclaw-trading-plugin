@@ -19,7 +19,7 @@ import { SimulationConfig, SimulationConfigPatch, Strategy } from "../schemas/st
 import { registerNostrNotifications } from "./register-nostr-notifications.js";
 import type { EthHeaders, PreparedAgentCreationContext } from "../types/billing.js";
 import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
-import { sanitizeBacktestResultResponse, WEB_URL } from "../utils/backtest-result.js";
+import { sanitizeBacktestResultResponse } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
 import { fetchEvmWalletBalances, textResult } from "../utils/live-trading.js";
@@ -445,6 +445,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     walletAgentUrl,
     settlementEngineUrl,
     enableAmmSpot,
+    defaultHyperliquidNetwork,
+    defaultHyperliquidChainId,
+    webUrl,
     billingEvmConfig,
     debugLog,
     responseErrorMessage,
@@ -784,7 +787,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       walletAddress: Type.Optional(Type.String({ description: "Wallet address (0x...) that can be either master or agent" })),
       masterWalletAddress: Type.Optional(Type.String({ description: "Master wallet address (backward-compatible alias). Prefer walletAddress." })),
       agentWalletAddress: Type.Optional(Type.String({ description: "Agent wallet address (backward-compatible alias). Prefer walletAddress." })),
-      chainId: Type.Optional(Type.Number({ description: "998=testnet, 999=mainnet", default: 998 })),
+      chainId: Type.Optional(Type.Number({ description: "998=testnet, 999=mainnet. Defaults to the configured network." })),
       coin: Type.Optional(Type.String({ description: "Coin symbol to query. Defaults to USDC." })),
     }),
     async execute(
@@ -799,7 +802,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         });
       }
 
-      const chainId = params.chainId ?? 998;
+      const chainId = params.chainId ?? defaultHyperliquidChainId;
       const coin = params.coin?.trim();
       const qs = new URLSearchParams({
         walletAddress: requestedWalletAddress,
@@ -1799,14 +1802,14 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     parameters: Type.Object({
       ethAgentPrivateKey: Type.String({ description: "Hyperliquid API wallet private key (hex, without 0x). This should resolve to the API/agent wallet address, not the master wallet address." }),
       masterWalletAddress: Type.String({ description: "Hyperliquid master wallet address (0x...). This must be different from the address resolved by ethAgentPrivateKey." }),
-      network: Type.Optional(Type.String({ description: '"testnet" or "mainnet"', default: "testnet" })),
+      network: Type.Optional(Type.String({ description: '"testnet" or "mainnet". Defaults to the configured network.' })),
     }),
     async execute(
       _id: string,
       params: { ethAgentPrivateKey: string; masterWalletAddress: string; network?: string },
     ) {
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
-      debugLog("setup_live_wallet", "entry", { masterWalletAddress: params.masterWalletAddress, network: params.network ?? "testnet" });
+      debugLog("setup_live_wallet", "entry", { masterWalletAddress: params.masterWalletAddress, network: params.network ?? defaultHyperliquidNetwork });
       const result: Record<string, unknown> = {};
 
       // Step 1: Prepare encryption payload for wallet-agent delegation
@@ -1883,7 +1886,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           createdAt,
           walletType: "hyperliquid_agent",
           masterWalletAddress: normalizedMasterWalletAddress,
-          hyperliquidNetwork: params.network ?? "testnet",
+          hyperliquidNetwork: params.network ?? defaultHyperliquidNetwork,
           walletAgentPublicKey,
           encryptedPrivateKey: teeEncryptedPrivateKey,
           walletAgentSignedAt,
@@ -2279,7 +2282,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         }
         const data = await res.json();
         agentId = data.agentId;
-        agentUrl = `${WEB_URL}/trading-agents/${publicKey}/${agentId}`;
+        agentUrl = `${webUrl}/trading-agents/${publicKey}/${agentId}`;
         debugLog("deploy_agent", "create.api.res", { status: res.status, body: data });
         result.create = { ok: true, agentId, agentUrl, createdAt: creationTimestamp };
       } catch (e: any) {
@@ -2769,7 +2772,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     description:
       "Get the result of a completed backtest job. " +
       "Mode 'detail' returns portfolio, metrics, and trades. " +
-      "Mode 'link' returns only a URL to the agent's page on agent.openswap.xyz (requires agentId).",
+      "Mode 'link' returns only a URL to the agent's web page (requires agentId).",
     parameters: Type.Object({
       jobId: Type.String({ description: "Backtest job ID" }),
       mode: Type.Optional(Type.Union([
@@ -2790,6 +2793,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         mode: params.mode,
         npub,
         agentId: params.agentId,
+        webUrl,
       }));
     },
   });
