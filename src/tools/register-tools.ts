@@ -23,7 +23,7 @@ import { sanitizeBacktestResultResponse } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
 import { fetchEvmWalletBalances, textResult } from "../utils/live-trading.js";
-import { createTelegramNotifier, type TelegramInlineKeyboard } from "../utils/notifications.js";
+import { sendTelegramMessage, type TelegramInlineKeyboard } from "../utils/notifications.js";
 import { fetchSupportedPairsFromApi } from "../utils/supported-pairs.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
@@ -190,6 +190,8 @@ export function buildHyperliquidSetupFlowResult(input: {
 export function buildHyperliquidSetupFlowSentResult(input: {
   network: string;
   expiresAt?: unknown;
+  telegramChatId?: string;
+  telegramMessageId?: number;
 }): HyperliquidSetupFlowSentResult {
   const structuredContent = {
     ok: true as const,
@@ -209,6 +211,8 @@ export function buildHyperliquidSetupFlowSentResult(input: {
     _meta: {
       suppressAssistantMessage: true,
       reason: "Fixed Telegram setup message with keyboard already sent directly by plugin.",
+      telegramChatId: input.telegramChatId,
+      telegramMessageId: input.telegramMessageId,
     },
   };
 }
@@ -2008,11 +2012,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         
         debugLog("request_hyperliquid_setup_flow", "result", result);
         const setupMessage = buildHyperliquidSetupTelegramMessage({ setupUrl, network });
-        const telegramMessageSent = await createTelegramNotifier()(setupMessage.message, { buttons: setupMessage.keyboard });
-        if (telegramMessageSent) {
+        const telegramMessage = await sendTelegramMessage(setupMessage.message, { buttons: setupMessage.keyboard });
+        if (telegramMessage.ok) {
           return buildHyperliquidSetupFlowSentResult({
             network,
             expiresAt: (resBody as any)?.data?.expiresAt,
+            telegramChatId: telegramMessage.chatId,
+            telegramMessageId: telegramMessage.messageId,
           });
         }
         

@@ -184,6 +184,15 @@ export type TelegramInlineKeyboardButton = {
   copy_text?: { text: string };
 };
 export type TelegramInlineKeyboard = Array<Array<TelegramInlineKeyboardButton>>;
+export type TelegramMessageOptions = {
+  parseMode?: "HTML" | "MarkdownV2";
+  buttons?: TelegramInlineKeyboard;
+};
+export type TelegramMessageResult = {
+  ok: boolean;
+  chatId?: string;
+  messageId?: number;
+};
 
 function readTelegramConfig(): { botToken: string | null; chatId: string | null } {
   const openclawDir = getOpenClawDir();
@@ -208,28 +217,82 @@ function readTelegramConfig(): { botToken: string | null; chatId: string | null 
 }
 
 export function createTelegramNotifier(): (message: string, options?: { parseMode?: "HTML" | "MarkdownV2"; buttons?: TelegramInlineKeyboard }) => Promise<boolean> {
-  let telegramBotToken: string | null = null;
-  let telegramChatId: string | null = null;
-
   return async (message, options) => {
-    if (!telegramBotToken || !telegramChatId) {
-      const config = readTelegramConfig();
-      telegramBotToken = config.botToken;
-      telegramChatId = config.chatId;
-      if (!telegramBotToken || !telegramChatId) return false;
-    }
-    const body: Record<string, unknown> = { chat_id: telegramChatId, text: message };
-    if (options?.parseMode) body.parse_mode = options.parseMode;
-    if (options?.buttons) body.reply_markup = { inline_keyboard: options.buttons };
-    try {
-      const res = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    const result = await sendTelegramMessage(message, options);
+    return result.ok;
   };
+}
+
+export async function sendTelegramMessage(message: string, options?: TelegramMessageOptions): Promise<TelegramMessageResult> {
+  const config = readTelegramConfig();
+  if (!config.botToken || !config.chatId) return { ok: false };
+  const body: Record<string, unknown> = { chat_id: config.chatId, text: message };
+  if (options?.parseMode) body.parse_mode = options.parseMode;
+  if (options?.buttons) body.reply_markup = { inline_keyboard: options.buttons };
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data: any = await res.json().catch(() => ({}));
+    return {
+      ok: res.ok && data?.ok !== false,
+      chatId: config.chatId,
+      messageId: typeof data?.result?.message_id === "number" ? data.result.message_id : undefined,
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export async function editTelegramMessage(input: {
+  chatId: string;
+  messageId: number;
+  text: string;
+  parseMode?: "HTML" | "MarkdownV2";
+  buttons?: TelegramInlineKeyboard;
+}): Promise<boolean> {
+  const config = readTelegramConfig();
+  if (!config.botToken) return false;
+  const body: Record<string, unknown> = {
+    chat_id: input.chatId,
+    message_id: input.messageId,
+    text: input.text,
+  };
+  if (input.parseMode) body.parse_mode = input.parseMode;
+  if (input.buttons) body.reply_markup = { inline_keyboard: input.buttons };
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${config.botToken}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteTelegramMessage(input: {
+  chatId: string;
+  messageId: number;
+}): Promise<boolean> {
+  const config = readTelegramConfig();
+  if (!config.botToken) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${config.botToken}/deleteMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: input.chatId,
+        message_id: input.messageId,
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
