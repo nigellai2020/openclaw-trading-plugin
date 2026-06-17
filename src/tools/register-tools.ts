@@ -23,7 +23,7 @@ import { sanitizeBacktestResultResponse } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
 import { fetchEvmWalletBalances, textResult } from "../utils/live-trading.js";
-import { createTelegramNotifier } from "../utils/notifications.js";
+import { createTelegramNotifier, type TelegramInlineKeyboard } from "../utils/notifications.js";
 import { fetchSupportedPairsFromApi } from "../utils/supported-pairs.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
@@ -52,6 +52,7 @@ type HyperliquidSetupFlowResult = {
   };
   _meta: Record<string, unknown>;
 };
+const TELEGRAM_COPY_TEXT_LIMIT = 256;
 
 const AGENT_TRADE_RANGE_MS: Record<Exclude<AgentTradeRange, "all">, number> = {
   "12h": 12 * 60 * 60 * 1000,
@@ -121,15 +122,7 @@ export function buildHyperliquidSetupFlowResult(input: {
   network: string;
   expiresAt?: unknown;
 }): HyperliquidSetupFlowResult {
-  const message = [
-    "Hyperliquid API wallet setup link generated.",
-    "",
-    `Open setup app: ${input.setupUrl}`,
-    "",
-    "This link expires in about 15 minutes. Open it, connect your Hyperliquid master wallet, generate or import an API wallet, authorize it if needed, and register it with OpenSwap.",
-    "",
-    "If it expires, ask me for a fresh Hyperliquid setup link.",
-  ].join("\n");
+  const { message, keyboard, refreshCallbackData } = buildHyperliquidSetupTelegramMessage(input);
 
   const openSetupAction = {
     type: "open_url",
@@ -141,10 +134,14 @@ export function buildHyperliquidSetupFlowResult(input: {
     label: "Copy setup link",
     text: input.setupUrl,
   };
+  const refreshLinkAction = {
+    type: "callback",
+    label: "Refresh link",
+    callbackData: refreshCallbackData,
+    request: `Request a fresh Hyperliquid ${input.network} setup link`,
+  };
   const telegramReplyMarkup = {
-    inline_keyboard: [
-      [{ text: "Open setup app", url: input.setupUrl }],
-    ],
+    inline_keyboard: keyboard,
   };
   const structuredContent = {
     ok: true as const,
@@ -153,10 +150,11 @@ export function buildHyperliquidSetupFlowResult(input: {
     token: input.token,
     network: input.network,
     expiresAt: input.expiresAt,
-    actions: [openSetupAction, copyLinkAction],
+    actions: [openSetupAction, copyLinkAction, refreshLinkAction],
     buttons: [
       { text: "Open setup app", url: input.setupUrl },
       { text: "Copy setup link", copyText: input.setupUrl },
+      { text: "Refresh link", callbackData: refreshCallbackData },
     ],
     telegram: {
       reply_markup: telegramReplyMarkup,
@@ -176,6 +174,47 @@ export function buildHyperliquidSetupFlowResult(input: {
       reply_markup: telegramReplyMarkup,
       telegram: structuredContent.telegram,
     },
+  };
+}
+
+export function buildHyperliquidSetupTelegramMessage(input: {
+  setupUrl: string;
+  network: string;
+}): {
+  message: string;
+  keyboard: TelegramInlineKeyboard;
+  refreshCallbackData: string;
+} {
+  const networkLabel = input.network === "mainnet" ? "mainnet" : "testnet";
+  const refreshCallbackData = `refresh Hyperliquid ${networkLabel} setup link`;
+  const copyButton = input.setupUrl.length <= TELEGRAM_COPY_TEXT_LIMIT
+    ? { text: "Copy link", copy_text: { text: input.setupUrl } }
+    : undefined;
+  const keyboard: TelegramInlineKeyboard = [
+    [{ text: "Open setup app", url: input.setupUrl }],
+    [
+      ...(copyButton ? [copyButton] : []),
+      { text: "Refresh link", callback_data: refreshCallbackData },
+    ],
+  ];
+
+  const copyInstruction = copyButton
+    ? "Use Copy link if you want to paste it on your desktop computer."
+    : "If you want to paste it on your desktop computer, copy the full link below.";
+
+  return {
+    message: [
+      `Your Hyperliquid ${networkLabel} wallet setup link is ready.`,
+      "",
+      `It expires in about 15 minutes. Tap Open setup app to connect your Hyperliquid master wallet, generate or import an API wallet, authorize it if needed, and register it with OpenSwap.`,
+      "",
+      copyInstruction,
+      "If the link expires, tap Refresh link and I will request a fresh one.",
+      "",
+      `Setup link: ${input.setupUrl}`,
+    ].join("\n"),
+    keyboard,
+    refreshCallbackData,
   };
 }
 
@@ -1932,10 +1971,8 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         result.expiresAt = (resBody as any)?.data?.expiresAt;
         
         debugLog("request_hyperliquid_setup_flow", "result", result);
-        await createTelegramNotifier()(
-          `Hyperliquid ${network} wallet setup link. It expires in about 15 minutes.`,
-          { buttons: [[{ text: "Open setup app", url: setupUrl }]] },
-        );
+        const setupMessage = buildHyperliquidSetupTelegramMessage({ setupUrl, network });
+        await createTelegramNotifier()(setupMessage.message, { buttons: setupMessage.keyboard });
         
         return buildHyperliquidSetupFlowResult({
           setupUrl,

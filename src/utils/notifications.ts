@@ -177,7 +177,13 @@ export function formatBillingExpiryNotification(event: any): string {
     : `[Billing reminder] ${agentLabel} billing is due soon.`;
 }
 
-export type TelegramInlineKeyboard = Array<Array<{ text: string; url?: string; callback_data?: string }>>;
+export type TelegramInlineKeyboardButton = {
+  text: string;
+  url?: string;
+  callback_data?: string;
+  copy_text?: { text: string };
+};
+export type TelegramInlineKeyboard = Array<Array<TelegramInlineKeyboardButton>>;
 
 function readTelegramConfig(): { botToken: string | null; chatId: string | null } {
   const openclawDir = getOpenClawDir();
