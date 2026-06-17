@@ -15,6 +15,8 @@ When presenting the result, include the setup URL verbatim unless the chat clien
 
 If `request_hyperliquid_setup_flow` returns `telegramMessageSent: true`, the fixed Telegram message with keyboard has already been sent. Do not send an additional user-facing message.
 
+The Refresh link button uses the plugin command `/hlrefresh testnet` or `/hlrefresh mainnet`, which bypasses the LLM. Do not ask the user to refresh with a natural-language message.
+
 The user completes the registration flow in the web app, which handles:
 - Master wallet connection
 - API wallet generation or import

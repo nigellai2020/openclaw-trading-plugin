@@ -23,7 +23,12 @@ import { sanitizeBacktestResultResponse } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
 import { fetchEvmWalletBalances, textResult } from "../utils/live-trading.js";
-import { sendTelegramMessage, type TelegramInlineKeyboard } from "../utils/notifications.js";
+import {
+  deleteTelegramMessage,
+  editTelegramMessage,
+  sendTelegramMessage,
+  type TelegramInlineKeyboard,
+} from "../utils/notifications.js";
 import { fetchSupportedPairsFromApi } from "../utils/supported-pairs.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
@@ -63,6 +68,7 @@ type HyperliquidSetupFlowSentResult = {
   _meta: Record<string, unknown>;
 };
 const TELEGRAM_COPY_TEXT_LIMIT = 256;
+export const HYPERLIQUID_SETUP_REFRESH_COMMAND = "hlrefresh";
 
 const AGENT_TRADE_RANGE_MS: Record<Exclude<AgentTradeRange, "all">, number> = {
   "12h": 12 * 60 * 60 * 1000,
@@ -224,19 +230,21 @@ export function buildHyperliquidSetupTelegramMessage(input: {
   message: string;
   keyboard: TelegramInlineKeyboard;
   refreshCallbackData: string;
+  refreshInstruction: string;
 } {
   const networkLabel = input.network === "mainnet" ? "mainnet" : "testnet";
-  const refreshCallbackData = `refresh Hyperliquid ${networkLabel} setup link`;
+  const refreshCallbackData = buildHyperliquidSetupRefreshCommand(networkLabel);
+  const refreshInstruction = "If the link expires, tap Refresh link and I will replace this message with a fresh one.";
   const copyButton = input.setupUrl.length <= TELEGRAM_COPY_TEXT_LIMIT
     ? { text: "Copy link", copy_text: { text: input.setupUrl } }
     : undefined;
   const keyboard: TelegramInlineKeyboard = [
     [{ text: "Open setup app", url: input.setupUrl }],
-    [
-      ...(copyButton ? [copyButton] : []),
-      { text: "Refresh link", callback_data: refreshCallbackData },
-    ],
   ];
+  keyboard.push([
+    ...(copyButton ? [copyButton] : []),
+    { text: "Refresh link", callback_data: refreshCallbackData },
+  ]);
 
   const copyInstruction = copyButton
     ? "Use Copy link if you want to paste it on your desktop computer."
@@ -249,13 +257,334 @@ export function buildHyperliquidSetupTelegramMessage(input: {
       `It expires in about 15 minutes. Tap Open setup app to connect your Hyperliquid master wallet, generate or import an API wallet, authorize it if needed, and register it with OpenSwap.`,
       "",
       copyInstruction,
-      "If the link expires, tap Refresh link and I will request a fresh one.",
+      refreshInstruction,
       "",
       `Setup link: ${input.setupUrl}`,
     ].join("\n"),
     keyboard,
     refreshCallbackData,
+    refreshInstruction,
   };
+}
+
+export function buildHyperliquidSetupRefreshCommand(network: string): string {
+  const networkLabel = network === "mainnet" ? "mainnet" : "testnet";
+  return `/${HYPERLIQUID_SETUP_REFRESH_COMMAND} ${networkLabel}`;
+}
+
+type HyperliquidSetupRequestResult = {
+  token: string;
+  network: string;
+  setupUrl: string;
+  expiresAt?: unknown;
+};
+
+async function requestHyperliquidSetupFlow(input: {
+  network: string;
+  pluginConfig: any;
+  baseUrl: string;
+  parseResponseBody: (res: Response) => Promise<unknown>;
+  responseErrorMessage: (body: unknown) => string;
+  debugLog: (tool: string, step: string, data: unknown) => void;
+}): Promise<HyperliquidSetupRequestResult> {
+  const { privateKey, publicKey } = loadKeys(input.pluginConfig);
+  const network = input.network === "mainnet" ? "mainnet" : "testnet";
+  const hyperliquidManagementUrl = input.pluginConfig.hyperliquidManagementUrl || "https://hyperliquid-management.pages.dev";
+  const auth = getAuthHeader(publicKey, privateKey);
+  const requestBody = { network };
+
+  input.debugLog("hyperliquid_setup_flow", "api.req POST /api/hyperliquid/setup-flow/request", requestBody);
+  const res = await fetch(`${input.baseUrl}/api/hyperliquid/setup-flow/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: auth },
+    body: JSON.stringify(requestBody),
+  });
+  const resBody = await input.parseResponseBody(res);
+  input.debugLog("hyperliquid_setup_flow", "api.res POST /api/hyperliquid/setup-flow/request", { status: res.status, body: resBody });
+
+  if (!res.ok) {
+    const backendError = input.responseErrorMessage(resBody);
+    throw new Error(`Failed to request setup flow: ${res.status}${backendError ? ` ${backendError}` : ""}`);
+  }
+
+  const token = (resBody as any)?.data?.token;
+  if (!token) {
+    throw new Error("No setup token received from backend");
+  }
+
+  return {
+    token,
+    network,
+    setupUrl: `${hyperliquidManagementUrl}/?token=${encodeURIComponent(token)}&network=${network}`,
+    expiresAt: (resBody as any)?.data?.expiresAt,
+  };
+}
+
+type HyperliquidRefreshCommandInput = {
+  network?: string;
+  telegramChatId?: string;
+  telegramMessageId?: number;
+};
+
+function valueAtPath(source: unknown, path: Array<string>): unknown {
+  let current = source;
+  for (const key of path) {
+    if (current == null || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function asStringId(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function asMessageId(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return undefined;
+}
+
+function collectCommandText(value: unknown, out: string[], depth = 0) {
+  if (depth > 4 || value == null) return;
+  if (typeof value === "string") {
+    out.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectCommandText(item, out, depth + 1);
+    return;
+  }
+  if (typeof value !== "object") return;
+
+  const obj = value as Record<string, unknown>;
+  for (const key of [
+    "command",
+    "text",
+    "data",
+    "callbackData",
+    "callback_data",
+    "message",
+    "prompt",
+    "content",
+    "update",
+    "event",
+    "raw",
+    "telegram",
+    "callback_query",
+    "callbackQuery",
+  ]) {
+    collectCommandText(obj[key], out, depth + 1);
+  }
+}
+
+function extractTelegramMessageMetadata(args: unknown[]): { chatId?: string; messageId?: number } {
+  const messagePaths = [
+    ["callback_query", "message"],
+    ["callbackQuery", "message"],
+    ["update", "callback_query", "message"],
+    ["update", "callbackQuery", "message"],
+    ["event", "callback_query", "message"],
+    ["event", "callbackQuery", "message"],
+    ["raw", "callback_query", "message"],
+    ["raw", "callbackQuery", "message"],
+    ["telegram", "callback_query", "message"],
+    ["telegram", "callbackQuery", "message"],
+  ];
+  for (const arg of args) {
+    for (const path of messagePaths) {
+      const message = valueAtPath(arg, path);
+      if (!message || typeof message !== "object") continue;
+      const chatId = asStringId(valueAtPath(message, ["chat", "id"]) ?? valueAtPath(message, ["chat_id"]) ?? valueAtPath(message, ["chatId"]));
+      const messageId = asMessageId(valueAtPath(message, ["message_id"]) ?? valueAtPath(message, ["messageId"]));
+      if (chatId && messageId !== undefined) return { chatId, messageId };
+    }
+  }
+
+  for (const arg of args) {
+    const chatId = asStringId(
+      valueAtPath(arg, ["telegramChatId"]) ??
+      valueAtPath(arg, ["chatId"]) ??
+      valueAtPath(arg, ["chat_id"]),
+    );
+    const messageId = asMessageId(
+      valueAtPath(arg, ["telegramMessageId"]) ??
+      valueAtPath(arg, ["messageId"]) ??
+      valueAtPath(arg, ["message_id"]),
+    );
+    if (chatId && messageId !== undefined) return { chatId, messageId };
+  }
+
+  return {};
+}
+
+export function extractHyperliquidSetupRefreshCommandInput(args: unknown[]): HyperliquidRefreshCommandInput {
+  const texts: string[] = [];
+  collectCommandText(args, texts);
+  const joined = texts.join(" ").toLowerCase();
+  const metadata = extractTelegramMessageMetadata(args);
+  return {
+    network: joined.includes("mainnet") ? "mainnet" : joined.includes("testnet") ? "testnet" : undefined,
+    telegramChatId: metadata.chatId,
+    telegramMessageId: metadata.messageId,
+  };
+}
+
+async function refreshHyperliquidSetupFlow(input: {
+  network: string;
+  telegramChatId?: string;
+  telegramMessageId?: number;
+  pluginConfig: any;
+  baseUrl: string;
+  parseResponseBody: (res: Response) => Promise<unknown>;
+  responseErrorMessage: (body: unknown) => string;
+  debugLog: (tool: string, step: string, data: unknown) => void;
+}) {
+  const setup = await requestHyperliquidSetupFlow(input);
+  const setupMessage = buildHyperliquidSetupTelegramMessage({ setupUrl: setup.setupUrl, network: setup.network });
+
+  if (input.telegramChatId && input.telegramMessageId !== undefined) {
+    const edited = await editTelegramMessage({
+      chatId: input.telegramChatId,
+      messageId: input.telegramMessageId,
+      text: setupMessage.message,
+      buttons: setupMessage.keyboard,
+    });
+    if (edited) {
+      return { ...setup, telegramMessageUpdated: true, telegramMessageSent: false };
+    }
+
+    const sent = await sendTelegramMessage(setupMessage.message, { buttons: setupMessage.keyboard });
+    if (sent.ok) {
+      const oldMessageDeleted = await deleteTelegramMessage({
+        chatId: input.telegramChatId,
+        messageId: input.telegramMessageId,
+      });
+      return {
+        ...setup,
+        telegramMessageUpdated: false,
+        telegramMessageSent: true,
+        oldMessageDeleted,
+        telegramChatId: sent.chatId,
+        telegramMessageId: sent.messageId,
+      };
+    }
+  }
+
+  const sent = await sendTelegramMessage(setupMessage.message, { buttons: setupMessage.keyboard });
+  return {
+    ...setup,
+    telegramMessageUpdated: false,
+    telegramMessageSent: sent.ok,
+    telegramChatId: sent.chatId,
+    telegramMessageId: sent.messageId,
+  };
+}
+
+export function buildHyperliquidSetupCommandHandledResult(result: Record<string, unknown>) {
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({
+        ok: result.ok !== false,
+        handledByCommand: true,
+        instruction: "The Hyperliquid setup refresh was handled directly by the plugin command. Do not send any additional user-facing message.",
+      }),
+    }],
+    structuredContent: {
+      ok: result.ok !== false,
+      handledByCommand: true,
+      network: result.network,
+      telegramMessageUpdated: result.telegramMessageUpdated,
+      telegramMessageSent: result.telegramMessageSent,
+      oldMessageDeleted: result.oldMessageDeleted,
+    },
+    _meta: {
+      suppressAssistantMessage: true,
+      reason: "Hyperliquid setup refresh handled by plugin command before the LLM.",
+    },
+  };
+}
+
+export function registerHyperliquidSetupRefreshCommand(api: any, input: {
+  pluginConfig: any;
+  baseUrl: string;
+  defaultHyperliquidNetwork: string;
+  parseResponseBody: (res: Response) => Promise<unknown>;
+  responseErrorMessage: (body: unknown) => string;
+  debugLog: (tool: string, step: string, data: unknown) => void;
+}) {
+  if (typeof api?.registerCommand !== "function") return false;
+
+  const handler = async (...args: unknown[]) => {
+    const commandInput = extractHyperliquidSetupRefreshCommandInput(args);
+    const network = commandInput.network ?? input.defaultHyperliquidNetwork;
+    input.debugLog("hyperliquid_setup_refresh_command", "entry", {
+      network,
+      hasTelegramMessage: Boolean(commandInput.telegramChatId && commandInput.telegramMessageId !== undefined),
+    });
+
+    try {
+      const result = await refreshHyperliquidSetupFlow({
+        network,
+        telegramChatId: commandInput.telegramChatId,
+        telegramMessageId: commandInput.telegramMessageId,
+        pluginConfig: input.pluginConfig,
+        baseUrl: input.baseUrl,
+        parseResponseBody: input.parseResponseBody,
+        responseErrorMessage: input.responseErrorMessage,
+        debugLog: input.debugLog,
+      });
+      input.debugLog("hyperliquid_setup_refresh_command", "result", result);
+      return buildHyperliquidSetupCommandHandledResult({ ok: true, ...result });
+    } catch (e: any) {
+      const result = { ok: false, error: e.message, network };
+      input.debugLog("hyperliquid_setup_refresh_command", "result", result);
+      return buildHyperliquidSetupCommandHandledResult(result);
+    }
+  };
+
+  const description = "Refresh a Hyperliquid setup link from an inline Telegram button without invoking the LLM.";
+  try {
+    api.registerCommand({
+      name: HYPERLIQUID_SETUP_REFRESH_COMMAND,
+      aliases: [buildHyperliquidSetupRefreshCommand("testnet"), buildHyperliquidSetupRefreshCommand("mainnet")],
+      description,
+      handler,
+      execute: handler,
+      run: handler,
+    });
+    return true;
+  } catch (firstError) {
+    try {
+      api.registerCommand(HYPERLIQUID_SETUP_REFRESH_COMMAND, handler, {
+        aliases: [buildHyperliquidSetupRefreshCommand("testnet"), buildHyperliquidSetupRefreshCommand("mainnet")],
+        description,
+      });
+      return true;
+    } catch (secondError) {
+      try {
+        api.registerCommand({
+          commands: [HYPERLIQUID_SETUP_REFRESH_COMMAND],
+          aliases: [buildHyperliquidSetupRefreshCommand("testnet"), buildHyperliquidSetupRefreshCommand("mainnet")],
+          description,
+          handler,
+          execute: handler,
+          run: handler,
+        });
+        return true;
+      } catch (thirdError) {
+        input.debugLog("hyperliquid_setup_refresh_command", "registration_failed", {
+          firstError: String(firstError),
+          secondError: String(secondError),
+          thirdError: String(thirdError),
+        });
+        return false;
+      }
+    }
+  }
 }
 
 function buildBillingBreakdown(
@@ -638,6 +967,14 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     waitForVaultCredit,
   } = ctx;
 
+  registerHyperliquidSetupRefreshCommand(api, {
+    pluginConfig,
+    baseUrl,
+    defaultHyperliquidNetwork,
+    parseResponseBody,
+    responseErrorMessage,
+    debugLog,
+  });
 
   // ── Existing tools ──────────────────────────────────────────────
 
@@ -1969,64 +2306,44 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       _id: string,
       params: { network?: string },
     ) {
-      const { privateKey, publicKey } = loadKeys(pluginConfig);
       const network = params.network ?? defaultHyperliquidNetwork;
-      const hyperliquidManagementUrl = pluginConfig.hyperliquidManagementUrl || "https://hyperliquid-management.pages.dev";
       
       debugLog("request_hyperliquid_setup_flow", "entry", { network });
       const result: Record<string, unknown> = {};
 
       try {
-        const auth = getAuthHeader(publicKey, privateKey);
-
-        const requestBody = {
+        const setup = await requestHyperliquidSetupFlow({
           network,
-        };
-        
-        debugLog("request_hyperliquid_setup_flow", "api.req POST /api/hyperliquid/setup-flow/request", requestBody);
-        const res = await fetch(`${baseUrl}/api/hyperliquid/setup-flow/request`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: auth },
-          body: JSON.stringify(requestBody),
+          pluginConfig,
+          baseUrl,
+          parseResponseBody,
+          responseErrorMessage,
+          debugLog,
         });
-        const resBody = await parseResponseBody(res);
-        debugLog("request_hyperliquid_setup_flow", "api.res POST /api/hyperliquid/setup-flow/request", { status: res.status, body: resBody });
-
-        if (!res.ok) {
-          const backendError = responseErrorMessage(resBody);
-          throw new Error(`Failed to request setup flow: ${res.status}${backendError ? ` ${backendError}` : ""}`);
-        }
-
-        const token = (resBody as any)?.data?.token;
-        if (!token) {
-          throw new Error("No setup token received from backend");
-        }
-
-        const setupUrl = `${hyperliquidManagementUrl}/?token=${encodeURIComponent(token)}&network=${network}`;
 
         result.ok = true;
-        result.token = token;
-        result.network = network;
-        result.setupUrl = setupUrl;
-        result.expiresAt = (resBody as any)?.data?.expiresAt;
+        result.token = setup.token;
+        result.network = setup.network;
+        result.setupUrl = setup.setupUrl;
+        result.expiresAt = setup.expiresAt;
         
         debugLog("request_hyperliquid_setup_flow", "result", result);
-        const setupMessage = buildHyperliquidSetupTelegramMessage({ setupUrl, network });
+        const setupMessage = buildHyperliquidSetupTelegramMessage({ setupUrl: setup.setupUrl, network: setup.network });
         const telegramMessage = await sendTelegramMessage(setupMessage.message, { buttons: setupMessage.keyboard });
         if (telegramMessage.ok) {
           return buildHyperliquidSetupFlowSentResult({
-            network,
-            expiresAt: (resBody as any)?.data?.expiresAt,
+            network: setup.network,
+            expiresAt: setup.expiresAt,
             telegramChatId: telegramMessage.chatId,
             telegramMessageId: telegramMessage.messageId,
           });
         }
         
         return buildHyperliquidSetupFlowResult({
-          setupUrl,
-          token,
-          network,
-          expiresAt: (resBody as any)?.data?.expiresAt,
+          setupUrl: setup.setupUrl,
+          token: setup.token,
+          network: setup.network,
+          expiresAt: setup.expiresAt,
         });
       } catch (e: any) {
         result.ok = false;

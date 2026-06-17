@@ -56,7 +56,7 @@ This tool generates a secure setup link and returns a user-friendly message with
 
 - **Copy link button** — For users who need to paste the link on a different device
 
-- **Refresh link button** — If the link expires (usually 15 minutes), the user can request a new one. If a callback button is not handled by the chat client, tell the user they can type "refresh Hyperliquid setup link" to get a new one.
+- **Refresh link button** — If the link expires (usually 15 minutes), the user can request a new one. The button callback is a plugin command (`/hlrefresh testnet` or `/hlrefresh mainnet`) so it bypasses the LLM. If a callback button is not handled by the chat client, tell the user they can type the matching command exactly.
 
 Handle the response:
 - If the tool returns an error, report it and STOP.
