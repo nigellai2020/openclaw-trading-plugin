@@ -16,10 +16,13 @@ function readConfigFile(filePath: string): Record<string, unknown> {
 }
 
 export function getOpenClawDir(): string {
+  if (process.env.OPENCLAW_STATE_DIR) return process.env.OPENCLAW_STATE_DIR;
+  if (process.env.OPENCLAW_HOME) return process.env.OPENCLAW_HOME;
   return path.join(os.homedir(), ".openclaw");
 }
 
 export function getOpenClawConfigPath(openclawDir = getOpenClawDir()): string {
+  if (process.env.OPENCLAW_CONFIG_PATH) return process.env.OPENCLAW_CONFIG_PATH;
   return path.join(openclawDir, PRIMARY_CONFIG_FILE_NAME);
 }
 

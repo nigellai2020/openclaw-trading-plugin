@@ -95,7 +95,7 @@ override its default. Add the config to `~/.openclaw/openclaw.json`:
 | ------------------------- | --------------------------------------------------------------------------- |
 | `init_trading_session`    | Initialize session: check keys and optionally list wallets                 |
 | `prepare_agent_creation`  | Preflight for direct or copy-agent creation — summarize billing, NFT, or vault setup. Pass `copiedFromAgentId` to preflight a copy agent |
-| `setup_live_wallet`       | Store agent wallet key in TEE and register in backend                       |
+| `request_hyperliquid_setup_flow` | Request a secure wallet setup link to register a new Hyperliquid API wallet with OpenSwap |
 | `deploy_agent`            | Create agent (direct or copy), run billing setup, notify bot, register trader (live), log action, verify. Pass `copiedFromAgentId` to create a copy agent |
 | `get_billing_subscriptions` | List billing subscriptions for the billing wallet derived from the configured Nostr key |
 | `prepare_agent_vault_credit_top_up` | Read-only preflight for adding billing vault credit to an existing agent |

@@ -19,7 +19,7 @@
       "get_agent",
       "update_agent",
       "init_trading_session",
-      "setup_live_wallet",
+      "request_hyperliquid_setup_flow",
       "prepare_agent_creation",
       "deploy_agent",
       "search_public_agents",
@@ -57,6 +57,10 @@
       "settlementEngineUrl": {
         "type": "string",
         "default": "https://settlement-agent.decom.dev"
+      },
+      "hyperliquidManagementUrl": {
+        "type": "string",
+        "default": "https://hyperliquid-management.pages.dev"
       },
       "enableAmmSpot": {
         "type": "boolean",

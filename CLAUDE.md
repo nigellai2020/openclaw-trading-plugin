@@ -20,7 +20,7 @@ Modular OpenClaw plugin keeping `src/tools.ts` as the public entrypoint and movi
 ### Key patterns
 
 - **Auth**: Nostr signing via `@scom/scom-signer` — generates Bearer tokens as `publicKey:signature`
-- **Composite tools**: `init_trading_session`, `setup_live_wallet`, `deploy_agent`, and `deploy_copy_agent` orchestrate multiple API calls into single tool invocations
+- **Composite tools**: `init_trading_session`, `request_hyperliquid_setup_flow`, `deploy_agent`, and `deploy_copy_agent` orchestrate multiple API calls or user interactions into single tool invocations
 - **Config loading**: Plugin config from `openclaw.plugin.json` → user config override → hardcoded defaults
 - **Responses**: Unified via `textResult()` wrapping data as JSON text content
 - **Debug logging**: Writes to `~/.openclaw/logs/trading-debug.json` (non-blocking)

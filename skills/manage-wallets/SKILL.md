@@ -1,9 +1,27 @@
 ---
 name: manage-wallets
-description: List, update, or delete wallets. Use when the user wants to see their wallets, rename a wallet, change Hyperliquid wallet metadata, remove a wallet, or manage wallet registrations.
+description: List, update, or delete wallets. Use when the user wants to see their wallets, rename a wallet, change Hyperliquid wallet metadata, remove a wallet, or manage wallet registrations. For setting up new Hyperliquid API wallets, use request_hyperliquid_setup_flow to get a guided registration link.
 ---
 
 # Manage Wallets
+
+## Register a new Hyperliquid API wallet
+Call `request_hyperliquid_setup_flow` to generate a secure setup link. This will return:
+- A link to open the hyperliquid-management web app
+- Instructions for the user to connect their master wallet, generate/import an API wallet, and register with OpenSwap
+- Options to copy the link or refresh it if it expires
+
+When presenting the result, include the setup URL verbatim unless the chat client has already rendered an open-app button in the same message. Do not refer to a "link above" unless the URL or button is visible.
+
+If `request_hyperliquid_setup_flow` returns `telegramMessageSent: true`, the fixed Telegram message with keyboard has already been sent. Do not send an additional user-facing message.
+
+The Refresh link button uses the plugin callback namespace `hlrefresh`, which bypasses the LLM and edits the existing Telegram message when possible. If the user needs a typed fallback, use `/hlrefresh testnet` or `/hlrefresh mainnet`; do not ask the user to refresh with a natural-language message.
+
+The user completes the registration flow in the web app, which handles:
+- Master wallet connection
+- API wallet generation or import
+- Hyperliquid authorization (if needed)
+- OpenSwap registration
 
 ## List wallets
 Call `list_wallets`.
