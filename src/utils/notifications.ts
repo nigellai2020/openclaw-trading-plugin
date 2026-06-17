@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { readOpenClawConfig as readStoredOpenClawConfig } from "./openclaw-config.js";
+import { getOpenClawDir, readOpenClawConfig as readStoredOpenClawConfig } from "./openclaw-config.js";
 
 function escapeHtml(s: string): string {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -178,13 +177,16 @@ export function formatBillingExpiryNotification(event: any): string {
     : `[Billing reminder] ${agentLabel} billing is due soon.`;
 }
 
+export type TelegramInlineKeyboard = Array<Array<{ text: string; url?: string; callback_data?: string }>>;
+
 function readTelegramConfig(): { botToken: string | null; chatId: string | null } {
-  const openclawDir = path.join(os.homedir(), ".openclaw");
+  const openclawDir = getOpenClawDir();
   let botToken: string | null = null;
   let chatId: string | null = null;
   try {
     const config: any = readStoredOpenClawConfig(openclawDir);
     botToken = config.channels?.telegram?.botToken ?? null;
+    chatId = config.channels?.telegram?.chatId ?? config.channels?.telegram?.allowFrom?.[0] ?? null;
   } catch {}
   try {
     const credentialsDir = path.join(openclawDir, "credentials");
@@ -199,7 +201,7 @@ function readTelegramConfig(): { botToken: string | null; chatId: string | null 
   return { botToken, chatId };
 }
 
-export function createTelegramNotifier(): (message: string, options?: { parseMode?: "HTML" | "MarkdownV2" }) => Promise<void> {
+export function createTelegramNotifier(): (message: string, options?: { parseMode?: "HTML" | "MarkdownV2"; buttons?: TelegramInlineKeyboard }) => Promise<void> {
   let telegramBotToken: string | null = null;
   let telegramChatId: string | null = null;
 
@@ -212,6 +214,7 @@ export function createTelegramNotifier(): (message: string, options?: { parseMod
     }
     const body: Record<string, unknown> = { chat_id: telegramChatId, text: message };
     if (options?.parseMode) body.parse_mode = options.parseMode;
+    if (options?.buttons) body.reply_markup = { inline_keyboard: options.buttons };
     try {
       await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
         method: "POST",

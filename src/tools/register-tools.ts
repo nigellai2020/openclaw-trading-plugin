@@ -23,6 +23,7 @@ import { sanitizeBacktestResultResponse } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
 import { formatAmount } from "../utils/billing.js";
 import { fetchEvmWalletBalances, textResult } from "../utils/live-trading.js";
+import { createTelegramNotifier } from "../utils/notifications.js";
 import { fetchSupportedPairsFromApi } from "../utils/supported-pairs.js";
 import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
@@ -1931,6 +1932,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         result.expiresAt = (resBody as any)?.data?.expiresAt;
         
         debugLog("request_hyperliquid_setup_flow", "result", result);
+        await createTelegramNotifier()(
+          `Hyperliquid ${network} wallet setup link. It expires in about 15 minutes.`,
+          { buttons: [[{ text: "Open setup app", url: setupUrl }]] },
+        );
         
         return buildHyperliquidSetupFlowResult({
           setupUrl,
