@@ -11,6 +11,8 @@ Call `request_hyperliquid_setup_flow` to generate a secure setup link. This will
 - Instructions for the user to connect their master wallet, generate/import an API wallet, and register with OpenSwap
 - Options to copy the link or refresh it if it expires
 
+When presenting the result, include the setup URL verbatim unless the chat client has already rendered an open-app button in the same message. Do not refer to a "link above" unless the URL or button is visible.
+
 The user completes the registration flow in the web app, which handles:
 - Master wallet connection
 - API wallet generation or import

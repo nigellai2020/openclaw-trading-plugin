@@ -32,6 +32,25 @@ type TokenPriceValidationIssue = {
   symbol: string;
   reason: string;
 };
+type HyperliquidSetupFlowResult = {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent: {
+    ok: true;
+    message: string;
+    setupUrl: string;
+    token: string;
+    network: string;
+    expiresAt?: unknown;
+    actions: Array<Record<string, unknown>>;
+    buttons: Array<Record<string, unknown>>;
+    telegram: {
+      reply_markup: {
+        inline_keyboard: Array<Array<Record<string, unknown>>>;
+      };
+    };
+  };
+  _meta: Record<string, unknown>;
+};
 
 const AGENT_TRADE_RANGE_MS: Record<Exclude<AgentTradeRange, "all">, number> = {
   "12h": 12 * 60 * 60 * 1000,
@@ -93,6 +112,70 @@ function validateRequestedTokenSymbols(symbols?: string[]): TokenPriceValidation
     }
     return [];
   });
+}
+
+export function buildHyperliquidSetupFlowResult(input: {
+  setupUrl: string;
+  token: string;
+  network: string;
+  expiresAt?: unknown;
+}): HyperliquidSetupFlowResult {
+  const message = [
+    "Hyperliquid API wallet setup link generated.",
+    "",
+    `Open setup app: ${input.setupUrl}`,
+    "",
+    "This link expires in about 15 minutes. Open it, connect your Hyperliquid master wallet, generate or import an API wallet, authorize it if needed, and register it with OpenSwap.",
+    "",
+    "If it expires, ask me for a fresh Hyperliquid setup link.",
+  ].join("\n");
+
+  const openSetupAction = {
+    type: "open_url",
+    label: "Open setup app",
+    url: input.setupUrl,
+  };
+  const copyLinkAction = {
+    type: "copy_text",
+    label: "Copy setup link",
+    text: input.setupUrl,
+  };
+  const telegramReplyMarkup = {
+    inline_keyboard: [
+      [{ text: "Open setup app", url: input.setupUrl }],
+    ],
+  };
+  const structuredContent = {
+    ok: true as const,
+    message,
+    setupUrl: input.setupUrl,
+    token: input.token,
+    network: input.network,
+    expiresAt: input.expiresAt,
+    actions: [openSetupAction, copyLinkAction],
+    buttons: [
+      { text: "Open setup app", url: input.setupUrl },
+      { text: "Copy setup link", copyText: input.setupUrl },
+    ],
+    telegram: {
+      reply_markup: telegramReplyMarkup,
+    },
+  };
+
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+    structuredContent,
+    _meta: {
+      setupUrl: input.setupUrl,
+      token: input.token,
+      network: input.network,
+      expiresAt: input.expiresAt,
+      actions: structuredContent.actions,
+      buttons: structuredContent.buttons,
+      reply_markup: telegramReplyMarkup,
+      telegram: structuredContent.telegram,
+    },
+  };
 }
 
 function buildBillingBreakdown(
@@ -1849,45 +1932,12 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         
         debugLog("request_hyperliquid_setup_flow", "result", result);
         
-        // Return a user-friendly message with actionable buttons
-        const message = `
-## 🔗 Hyperliquid API Wallet Setup
-
-I've generated a secure setup link for you to register your Hyperliquid API wallet with OpenSwap. This link will expire in about 15 minutes.
-
-**Setup Link:**
-\`${setupUrl}\`
-
-### What to do next:
-
-1. **[Open Setup App](${setupUrl})** — Click here to open the wallet registration interface in your browser (recommended for mobile users)
-
-2. **Copy Link** — Use this button if you need to paste the link on a different device:
-\`\`\`
-${setupUrl}
-\`\`\`
-
-3. **Need a New Link?** — If the setup link expires or you close the tab, just ask me to request a fresh one with the same command.
-
-### In the setup app, you'll:
-- Connect your Hyperliquid master wallet
-- Generate or import an API wallet
-- Authorize it on Hyperliquid (if needed)
-- Register it with OpenSwap
-
-**Note:** The setup app will refresh your session automatically while the tab is open. If the link expires, request a new one.
-`;
-
-        return {
-          type: "text",
-          text: message,
-          metadata: {
-            setupUrl,
-            token,
-            network,
-            expiresAt: (resBody as any)?.data?.expiresAt,
-          }
-        };
+        return buildHyperliquidSetupFlowResult({
+          setupUrl,
+          token,
+          network,
+          expiresAt: (resBody as any)?.data?.expiresAt,
+        });
       } catch (e: any) {
         result.ok = false;
         result.error = e.message;
