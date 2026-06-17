@@ -52,6 +52,16 @@ type HyperliquidSetupFlowResult = {
   };
   _meta: Record<string, unknown>;
 };
+type HyperliquidSetupFlowSentResult = {
+  content: Array<{ type: "text"; text: string }>;
+  structuredContent: {
+    ok: true;
+    telegramMessageSent: true;
+    network: string;
+    expiresAt?: unknown;
+  };
+  _meta: Record<string, unknown>;
+};
 const TELEGRAM_COPY_TEXT_LIMIT = 256;
 
 const AGENT_TRADE_RANGE_MS: Record<Exclude<AgentTradeRange, "all">, number> = {
@@ -173,6 +183,32 @@ export function buildHyperliquidSetupFlowResult(input: {
       buttons: structuredContent.buttons,
       reply_markup: telegramReplyMarkup,
       telegram: structuredContent.telegram,
+    },
+  };
+}
+
+export function buildHyperliquidSetupFlowSentResult(input: {
+  network: string;
+  expiresAt?: unknown;
+}): HyperliquidSetupFlowSentResult {
+  const structuredContent = {
+    ok: true as const,
+    telegramMessageSent: true as const,
+    network: input.network,
+    expiresAt: input.expiresAt,
+  };
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({
+        ...structuredContent,
+        instruction: "The fixed Telegram setup message with keyboard has already been sent. Do not send any additional user-facing message.",
+      }),
+    }],
+    structuredContent,
+    _meta: {
+      suppressAssistantMessage: true,
+      reason: "Fixed Telegram setup message with keyboard already sent directly by plugin.",
     },
   };
 }
@@ -1972,7 +2008,13 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         
         debugLog("request_hyperliquid_setup_flow", "result", result);
         const setupMessage = buildHyperliquidSetupTelegramMessage({ setupUrl, network });
-        await createTelegramNotifier()(setupMessage.message, { buttons: setupMessage.keyboard });
+        const telegramMessageSent = await createTelegramNotifier()(setupMessage.message, { buttons: setupMessage.keyboard });
+        if (telegramMessageSent) {
+          return buildHyperliquidSetupFlowSentResult({
+            network,
+            expiresAt: (resBody as any)?.data?.expiresAt,
+          });
+        }
         
         return buildHyperliquidSetupFlowResult({
           setupUrl,

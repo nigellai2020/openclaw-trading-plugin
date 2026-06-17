@@ -207,7 +207,7 @@ function readTelegramConfig(): { botToken: string | null; chatId: string | null 
   return { botToken, chatId };
 }
 
-export function createTelegramNotifier(): (message: string, options?: { parseMode?: "HTML" | "MarkdownV2"; buttons?: TelegramInlineKeyboard }) => Promise<void> {
+export function createTelegramNotifier(): (message: string, options?: { parseMode?: "HTML" | "MarkdownV2"; buttons?: TelegramInlineKeyboard }) => Promise<boolean> {
   let telegramBotToken: string | null = null;
   let telegramChatId: string | null = null;
 
@@ -216,17 +216,20 @@ export function createTelegramNotifier(): (message: string, options?: { parseMod
       const config = readTelegramConfig();
       telegramBotToken = config.botToken;
       telegramChatId = config.chatId;
-      if (!telegramBotToken || !telegramChatId) return;
+      if (!telegramBotToken || !telegramChatId) return false;
     }
     const body: Record<string, unknown> = { chat_id: telegramChatId, text: message };
     if (options?.parseMode) body.parse_mode = options.parseMode;
     if (options?.buttons) body.reply_markup = { inline_keyboard: options.buttons };
     try {
-      await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+      const res = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-    } catch {}
+      return res.ok;
+    } catch {
+      return false;
+    }
   };
 }

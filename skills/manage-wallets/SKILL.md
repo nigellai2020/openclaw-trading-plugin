@@ -13,6 +13,8 @@ Call `request_hyperliquid_setup_flow` to generate a secure setup link. This will
 
 When presenting the result, include the setup URL verbatim unless the chat client has already rendered an open-app button in the same message. Do not refer to a "link above" unless the URL or button is visible.
 
+If `request_hyperliquid_setup_flow` returns `telegramMessageSent: true`, the fixed Telegram message with keyboard has already been sent. Do not send an additional user-facing message.
+
 The user completes the registration flow in the web app, which handles:
 - Master wallet connection
 - API wallet generation or import

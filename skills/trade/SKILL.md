@@ -60,6 +60,7 @@ This tool generates a secure setup link and returns a user-friendly message with
 
 Handle the response:
 - If the tool returns an error, report it and STOP.
+- If the tool returns `telegramMessageSent: true`, the fixed Telegram message with keyboard has already been sent. Do not send any additional user-facing message. STOP.
 - Share the generated setup URL verbatim with the user and ask them to open the setup app. Do not say "link above" unless the URL or an open-app button is visible in the same message.
 - The user completes the wallet setup in the app, which handles all encryption, authorization, and registration automatically.
 - Once the user confirms they've completed the setup, continue to Step 4.
