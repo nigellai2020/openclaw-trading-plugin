@@ -11,7 +11,7 @@ Follow these steps to create a paper or live trading agent. This skill covers bo
 
 **Scope boundary:** This skill is for new agent creation only. If the user wants to add billing vault credit for an existing agent or reactivate an expired agent, switch to the `manage-agents` skill and use `prepare_agent_vault_credit_top_up` / `top_up_agent_vault_credit` for top-ups or `reactivate_expired_agent` for expired-agent recovery.
 
-**Session constraint (strict):** All plugin tool calls in this workflow (`init_trading_session`, `setup_live_wallet`, `search_public_agents`, `prepare_agent_creation`, `deploy_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
+**Session constraint (strict):** All plugin tool calls in this workflow (`init_trading_session`, `request_hyperliquid_setup_flow`, `search_public_agents`, `prepare_agent_creation`, `deploy_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
 
 **No-fabrication rule (strict):** Do not invent, auto-fill, or infer values the user did not provide. Keep optional fields omitted. If a required field is missing or ambiguous, ask the user a direct follow-up question before calling tools.
 
@@ -44,39 +44,35 @@ Handle the response:
 - **If live + no wallets on the chosen network**: Continue to Step 3.
 - **If paper**: Skip to Step 5.
 
-## Step 3 (live only) — Create API wallet on Hyperliquid
-Ask the user if they already have a Hyperliquid API wallet private key.
-- If yes: ask for the private key and their master wallet address (0x...), proceed to Step 4.
-- If no: guide them:
-  1. Go to Hyperliquid (testnet: app.hyperliquid-testnet.xyz, mainnet: app.hyperliquid.xyz)
-  2. Connect their master wallet
-  3. Click **More** > **API** (or visit the /API page)
-  4. Click **Create API Wallet**, enter a name, click **Generate**
-  5. **Copy the private key immediately** (shown only once)
-  6. Set validity to MAX (180 days), click **Authorize**, sign the message
+## Step 3 (live only) — Request Hyperliquid API wallet setup
+Call `request_hyperliquid_setup_flow` with the chosen `network` (testnet or mainnet).
 
-Then ask for:
-1. the API wallet private key
-2. their master wallet address (0x...)
+This tool generates a secure setup link and returns a user-friendly message with:
+- **A link to open the setup app** — Shows the user the hyperliquid-management web app where they will:
+  1. Connect their Hyperliquid master wallet
+  2. Generate a new API wallet in-browser or import an existing one
+  3. Authorize the wallet on Hyperliquid (if needed)
+  4. Register the wallet with OpenSwap
 
-Clarify the distinction explicitly:
-- The API wallet private key should resolve to the API/agent wallet address created in Hyperliquid's API page.
-- The master wallet address is the main wallet that authorized that API wallet.
-- These must be different addresses. If the user gives the same address for both, stop and ask them to re-check which one is their master wallet.
+- **Copy link button** — For users who need to paste the link on a different device
 
-## Step 4 (live only) — Store and register wallet
-Call `setup_live_wallet` with `ethAgentPrivateKey`, `masterWalletAddress`, and `network`.
+- **Refresh link button** — If the link expires (usually 15 minutes), the user can request a new one
 
 Handle the response:
-- **teeStorage.ok = false**: Report the error and STOP.
-- **registration.ok = false**: Report the exact backend error text and STOP.
-  - Do not infer causes from status codes (for example, do not say `422` "usually means already registered").
-  - Do not suggest deleting any wallet unless the backend message explicitly says the same wallet already exists.
-- Save `teeStorage.agentWalletAddress` and `registration.walletAddress`.
-- For agent deployment payloads, map wallet values into:
-  - `walletAddress` = agent/API wallet address (preferred single live wallet selector)
-  - `settlementConfig.ethAddress` = master wallet address
-  - `settlementConfig.agentAddress` = agent/API wallet address
+- If the tool returns an error, report it and STOP.
+- Share the generated message with the user and ask them to open the setup app.
+- The user completes the wallet setup in the app, which handles all encryption, authorization, and registration automatically.
+- Once the user confirms they've completed the setup, continue to Step 4.
+
+**Note:** The setup app is mobile-friendly and optimized for the wallet registration flow. It will refresh the session automatically while the tab is open.
+
+## Step 4 (live only) — Verify wallet registration
+Ask the user to confirm they've completed the wallet setup in the hyperliquid-management app. Once confirmed:
+- The wallet has been securely registered with OpenSwap
+- The API wallet is authorized on Hyperliquid
+- You're ready to proceed with agent deployment
+
+Continue to Step 5.
 
 ## Step 5 — Build strategy _(skip for copy agents)_
 

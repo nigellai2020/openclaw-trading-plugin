@@ -1797,131 +1797,103 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
   });
 
   api.registerTool({
-    name: "setup_live_wallet",
-    description: "Store an agent wallet key in TEE and register it in the backend. Replaces sequential calls to store_wallet_in_tee + register_wallet. Call this tool directly from the current session; do not delegate it to a subagent or replace it with exec/direct HTTP workarounds.",
+    name: "request_hyperliquid_setup_flow",
+    description: "Request a Hyperliquid API wallet setup link from trading-data and return a user-friendly message with buttons to open the setup app, copy the link, or refresh the request. This tool replaces the old setup_live_wallet flow, providing a guided wallet registration experience via the hyperliquid-management web app.",
     parameters: Type.Object({
-      ethAgentPrivateKey: Type.String({ description: "Hyperliquid API wallet private key (hex, without 0x). This should resolve to the API/agent wallet address, not the master wallet address." }),
-      masterWalletAddress: Type.String({ description: "Hyperliquid master wallet address (0x...). This must be different from the address resolved by ethAgentPrivateKey." }),
       network: Type.Optional(Type.String({ description: '"testnet" or "mainnet". Defaults to the configured network.' })),
     }),
     async execute(
       _id: string,
-      params: { ethAgentPrivateKey: string; masterWalletAddress: string; network?: string },
+      params: { network?: string },
     ) {
-      const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
-      debugLog("setup_live_wallet", "entry", { masterWalletAddress: params.masterWalletAddress, network: params.network ?? defaultHyperliquidNetwork });
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
+      const network = params.network ?? defaultHyperliquidNetwork;
+      const hyperliquidManagementUrl = pluginConfig.hyperliquidManagementUrl || "https://hyperliquid-management.pages.dev";
+      
+      debugLog("request_hyperliquid_setup_flow", "entry", { network });
       const result: Record<string, unknown> = {};
 
-      // Step 1: Prepare encryption payload for wallet-agent delegation
-      // (trading-data always forwards to wallet-agent TEE)
-      let agentWalletAddress: string;
-      let normalizedMasterWalletAddress: string;
-      let walletAgentPublicKey = "";
-      let teeEncryptedPrivateKey = "";
-      let walletAgentSignedAt = 0;
-      try {
-        // Derive and validate the API wallet locally before any backend registration step.
-        const ethWallet = new Wallet("0x" + params.ethAgentPrivateKey);
-        agentWalletAddress = ethWallet.address;
-        normalizedMasterWalletAddress = getAddress(params.masterWalletAddress);
-
-        if (normalizedMasterWalletAddress === agentWalletAddress) {
-          throw new Error(
-            `masterWalletAddress matches the API wallet address derived from ethAgentPrivateKey (${agentWalletAddress}). ` +
-            "These must be different: provide your Hyperliquid master wallet address as masterWalletAddress, and the API wallet private key as ethAgentPrivateKey.",
-          );
-        }
-
-        const pubKeyRes = await fetch(`${walletAgentUrl}/pubkey`);
-        if (!pubKeyRes.ok) throw new Error(`Failed to get wallet-agent pubkey: ${pubKeyRes.status}`);
-        const { publicKey: walletAgentPubKey } = await pubKeyRes.json();
-        walletAgentPublicKey = walletAgentPubKey;
-
-        const ephemeralKey = Keys.generatePrivateKey();
-        const ephemeralPubKey = Keys.getPublicKey(ephemeralKey);
-        const encrypted = await Crypto.encryptSharedMessage(
-          ephemeralKey,
-          walletAgentPubKey,
-          params.ethAgentPrivateKey,
-        );
-        teeEncryptedPrivateKey = `${encrypted}&pbk=02${ephemeralPubKey}`;
-        walletAgentSignedAt = Math.floor(Date.now() / 1000);
-        debugLog("setup_live_wallet", "prepare.delegation", { agentWalletAddress, walletAgentPublicKey });
-
-        result.teeStorage = { ok: true, agentWalletAddress, delegated: true };
-      } catch (e: any) {
-        result.teeStorage = { ok: false, error: e.message };
-        debugLog("setup_live_wallet", "result", result);
-        return textResult(result);
-      }
-
-      // Step 2: Register wallet in backend
       try {
         const auth = getAuthHeader(publicKey, privateKey);
 
-        const findWallet = async () => {
-          const res = await fetch(`${baseUrl}/api/wallets?npub=${npub}`, {
-            headers: { Authorization: auth },
-          });
-          if (!res.ok) return undefined;
-          const data = await res.json();
-          return (data.data || []).find(
-            (w: any) => w.wallet_address.toLowerCase() === agentWalletAddress.toLowerCase(),
-          );
+        const requestBody = {
+          network,
         };
-
-        const existing = await findWallet();
-        if (existing) {
-          result.registration = { ok: true, walletAddress: existing.wallet_address };
-          debugLog("setup_live_wallet", "result", result);
-          return textResult(result);
-        }
-
-        const createdAt = Math.floor(Date.now() / 1000);
-
-        const registerBody = {
-          npub,
-          name: `Wallet-${createdAt}`,
-          walletAddress: agentWalletAddress,
-          createdAt,
-          walletType: "hyperliquid_agent",
-          masterWalletAddress: normalizedMasterWalletAddress,
-          hyperliquidNetwork: params.network ?? defaultHyperliquidNetwork,
-          walletAgentPublicKey,
-          encryptedPrivateKey: teeEncryptedPrivateKey,
-          walletAgentSignedAt,
-        };
-        debugLog("setup_live_wallet", "api.req POST /api/wallets", registerBody);
-        const res = await fetch(`${baseUrl}/api/wallets`, {
+        
+        debugLog("request_hyperliquid_setup_flow", "api.req POST /api/hyperliquid/setup-flow/request", requestBody);
+        const res = await fetch(`${baseUrl}/api/hyperliquid/setup-flow/request`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: auth },
-          body: JSON.stringify(registerBody),
+          body: JSON.stringify(requestBody),
         });
         const resBody = await parseResponseBody(res);
-        debugLog("setup_live_wallet", "api.res POST /api/wallets", { status: res.status, body: resBody });
+        debugLog("request_hyperliquid_setup_flow", "api.res POST /api/hyperliquid/setup-flow/request", { status: res.status, body: resBody });
+
         if (!res.ok) {
           const backendError = responseErrorMessage(resBody);
-          const retry = await findWallet();
-          if (retry) {
-            result.registration = { ok: true, walletAddress: retry.wallet_address };
-            debugLog("setup_live_wallet", "result", result);
-            return textResult(result);
-          }
-          throw new Error(`register_wallet failed: ${res.status}${backendError ? ` ${backendError}` : ""}`);
+          throw new Error(`Failed to request setup flow: ${res.status}${backendError ? ` ${backendError}` : ""}`);
         }
 
-        const created = await findWallet();
-        if (!created) throw new Error("Wallet not found after registration");
-        result.registration = { ok: true, walletAddress: created.wallet_address };
-      } catch (e: any) {
-        result.registration = {
-          ok: false,
-          error: e.message,
-        };
-      }
+        const token = (resBody as any)?.data?.token;
+        if (!token) {
+          throw new Error("No setup token received from backend");
+        }
 
-      debugLog("setup_live_wallet", "result", result);
-      return textResult(result);
+        const setupUrl = `${hyperliquidManagementUrl}/?token=${encodeURIComponent(token)}&network=${network}`;
+
+        result.ok = true;
+        result.token = token;
+        result.network = network;
+        result.setupUrl = setupUrl;
+        result.expiresAt = (resBody as any)?.data?.expiresAt;
+        
+        debugLog("request_hyperliquid_setup_flow", "result", result);
+        
+        // Return a user-friendly message with actionable buttons
+        const message = `
+## 🔗 Hyperliquid API Wallet Setup
+
+I've generated a secure setup link for you to register your Hyperliquid API wallet with OpenSwap. This link will expire in about 15 minutes.
+
+**Setup Link:**
+\`${setupUrl}\`
+
+### What to do next:
+
+1. **[Open Setup App](${setupUrl})** — Click here to open the wallet registration interface in your browser (recommended for mobile users)
+
+2. **Copy Link** — Use this button if you need to paste the link on a different device:
+\`\`\`
+${setupUrl}
+\`\`\`
+
+3. **Need a New Link?** — If the setup link expires or you close the tab, just ask me to request a fresh one with the same command.
+
+### In the setup app, you'll:
+- Connect your Hyperliquid master wallet
+- Generate or import an API wallet
+- Authorize it on Hyperliquid (if needed)
+- Register it with OpenSwap
+
+**Note:** The setup app will refresh your session automatically while the tab is open. If the link expires, request a new one.
+`;
+
+        return {
+          type: "text",
+          text: message,
+          metadata: {
+            setupUrl,
+            token,
+            network,
+            expiresAt: (resBody as any)?.data?.expiresAt,
+          }
+        };
+      } catch (e: any) {
+        result.ok = false;
+        result.error = e.message;
+        debugLog("request_hyperliquid_setup_flow", "result", result);
+        return textResult(result);
+      }
     },
   });
 

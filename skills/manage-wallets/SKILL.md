@@ -1,9 +1,21 @@
 ---
 name: manage-wallets
-description: List, update, or delete wallets. Use when the user wants to see their wallets, rename a wallet, change Hyperliquid wallet metadata, remove a wallet, or manage wallet registrations.
+description: List, update, or delete wallets. Use when the user wants to see their wallets, rename a wallet, change Hyperliquid wallet metadata, remove a wallet, or manage wallet registrations. For setting up new Hyperliquid API wallets, use request_hyperliquid_setup_flow to get a guided registration link.
 ---
 
 # Manage Wallets
+
+## Register a new Hyperliquid API wallet
+Call `request_hyperliquid_setup_flow` to generate a secure setup link. This will return:
+- A link to open the hyperliquid-management web app
+- Instructions for the user to connect their master wallet, generate/import an API wallet, and register with OpenSwap
+- Options to copy the link or refresh it if it expires
+
+The user completes the registration flow in the web app, which handles:
+- Master wallet connection
+- API wallet generation or import
+- Hyperliquid authorization (if needed)
+- OpenSwap registration
 
 ## List wallets
 Call `list_wallets`.
