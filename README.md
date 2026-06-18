@@ -94,13 +94,9 @@ override its default. Add the config to `~/.openclaw/openclaw.json`:
 | Tool                      | Description                                                                 |
 | ------------------------- | --------------------------------------------------------------------------- |
 | `init_trading_session`    | Initialize session: check keys and optionally list wallets                 |
-| `prepare_agent_creation`  | Preflight for direct or copy-agent creation — summarize billing, NFT, or vault setup. Pass `copiedFromAgentId` to preflight a copy agent |
+| `prepare_agent_creation`  | Preflight for direct or copy-agent creation and summarize the normalized execution plan. Pass `copiedFromAgentId` to preflight a copy agent |
 | `request_hyperliquid_setup_flow` | Request a secure wallet setup link to register a new Hyperliquid API wallet with OpenSwap |
-| `deploy_agent`            | Create agent (direct or copy), run billing setup, notify bot, register trader (live), log action, verify. Pass `copiedFromAgentId` to create a copy agent |
-| `get_billing_subscriptions` | List billing subscriptions for the billing wallet derived from the configured Nostr key |
-| `prepare_agent_vault_credit_top_up` | Read-only preflight for adding billing vault credit to an existing agent |
-| `top_up_agent_vault_credit` | Execute the BNB→OSWAP→vault deposit flow to add billing vault credit to an existing agent |
-| `reactivate_expired_agent` | Reactivate an expired agent when vault credit is already sufficient; otherwise explain the required top-up |
+| `deploy_agent`            | Create agent (direct or copy), notify bot, register trader (live), log action, and verify. Pass `copiedFromAgentId` to create a copy agent |
 | `get_agent`               | Get agent details by ID                                                     |
 | `update_agent`            | Update only the requested agent fields across the supported backends. Pass `copiedFromAgentId` to switch the source agent being followed |
 | `get_hyperliquid_balance` | Get USDC balance of a Hyperliquid master wallet                             |
@@ -122,7 +118,7 @@ override its default. Add the config to `~/.openclaw/openclaw.json`:
 | Skill                | Description                              |
 | -------------------- | ---------------------------------------- |
 | `trade`              | Guided workflow for creating new paper, live, or copy agents |
-| `manage-agents`      | Guided workflow for listing, updating, topping up billing vault credit, reactivating expired agents, and deleting agents |
+| `manage-agents`      | Guided workflow for listing, updating, reactivating, and deleting agents |
 | `manage-wallets`     | Guided workflow for listing, updating, and deleting wallets |
 | `market-data`        | Guided workflow for current token prices and historical market data |
 | `backtest`           | Guided workflow for running backtests    |

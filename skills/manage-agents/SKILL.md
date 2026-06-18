@@ -1,53 +1,36 @@
 ---
 name: manage-agents
-description: List, update, add billing vault credit for, reactivate, or delete trading agents. Use when the user wants to see their agents, change agent settings, top up billing credit, reactivate an expired agent, remove an agent, or clean up old agents.
+description: List, update, reactivate, or delete trading agents. Use when the user wants to see their agents, change agent settings, re-enable an inactive agent, remove an agent, or clean up old agents.
 ---
 
 # Manage Trading Agents
 
-**Session constraint (strict):** All plugin tool calls in this workflow (`list_my_agents`, `get_billing_subscriptions`, `prepare_agent_vault_credit_top_up`, `top_up_agent_vault_credit`, `reactivate_expired_agent`, `get_agent`, `update_agent`, `delete_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
+**Session constraint (strict):** All plugin tool calls in this workflow (`list_my_agents`, `get_agent`, `update_agent`, `delete_agent`) MUST be called directly from the current main session. Do NOT spawn a subagent for any step in this workflow. Do NOT use `exec`, custom scripts, or direct HTTP calls to the backend as a workaround. If a required tool is unavailable in the current tool list, stop and report a plugin or configuration issue instead of delegating.
 
 ## List agents
-Call `list_my_agents`. Optional filters: `mode` ("live"/"paper"), `marketType` ("spot"/"perp"), `page`, `pageSize`.
+Call `list_my_agents`. Optional filters: `mode` (`live` or `paper`), `marketType` (`spot` or `perp`), `page`, `pageSize`.
 
 Present results as a table: ID, name, pair, mode, market type, initial capital, current value, P&L, status.
-
-## Billing subscriptions
-If the user asks about billing subscriptions, vault credit, renewal status, or next billing dates, call `get_billing_subscriptions` and summarize the active subscriptions for the current billing wallet.
-
-## Top up billing vault credit
-1. If the user has not specified an agent ID, call `list_my_agents` first and ask which agent needs a billing top-up.
-2. Call `prepare_agent_vault_credit_top_up` with the `agentId`. This is a read-only preflight. Do not call `top_up_agent_vault_credit` in the same turn as the preflight.
-3. Present the result in plain language. Always show the full billing wallet address when the user needs to fund it. Never abbreviate `0x...`.
-4. If `fees.oswapShortfall > 0`, instruct the user to send only the missing `funding.bnbShortfall` amount of BNB to the billing wallet. Do not ask the user to source OSWAP separately unless they explicitly ask for the manual path.
-5. If `funding.bnbShortfall = 0`, tell the user the billing wallet is already funded and ask for explicit confirmation before continuing.
-6. Wait for an explicit reply such as `done`, `confirm`, or `proceed` after funding. The original top-up request does not count as confirmation.
-7. Call `top_up_agent_vault_credit` with the same `agentId`.
-8. Report the result as a billing-vault-credit receipt: wallet used, swap/approval/deposit transaction results, updated vault credit, and next billing date estimate. Include any warning returned in `billing.result.warning`.
-
-## Reactivate expired agent
-1. If the user has not specified an agent ID, call `list_my_agents` first and ask which expired agent should be reactivated.
-2. Call `reactivate_expired_agent` with the `agentId`.
-3. If the tool returns `reactivation.status = "insufficient_vault_credit"`, explain that reactivation cannot proceed yet because the billing vault credit is too low.
-4. Always show the full billing wallet address when the tool asks the user to fund it.
-5. If `reactivation.bnbShortfall` is non-zero, tell the user to fund only that missing BNB amount, then use `prepare_agent_vault_credit_top_up` and `top_up_agent_vault_credit` before retrying `reactivate_expired_agent`.
-6. If `reactivation.bnbShortfall` is zero, tell the user the billing wallet is already funded enough for the top-up flow; they only need to run the vault-credit top-up before retrying reactivation.
-7. If the tool returns `reactivation.status = "reactivated"`, report the reactivation result, updated vault credit if available, and the next billing date estimate.
 
 ## Update an agent
 1. If the user has not specified an agent ID, call `list_my_agents` first and ask which agent to update.
 2. Call `get_agent` if you need a quick public summary before confirming the change.
 3. Call `update_agent` with only the fields the user explicitly wants changed. Do not infer or auto-fill missing values.
-4. `chainId` can be set for both paper and live agents — it selects the network (Hyperliquid 998/999 or EVM chain ID).
-5. If the requested change touches live runtime fields (`walletAddress`, `settlementConfig`, `symbol`, `chainId`, `protocol`) and the tool reports missing companion fields, ask the user only for the missing companion fields before retrying.
-6. For live wallet updates, prefer `walletAddress` (mapped to API `wallet_address`) when the user gives a single wallet. Use `settlementConfig` only when they explicitly provide both master+agent addresses.
+4. `chainId` can be set for both paper and live agents. It selects the execution network.
+5. If the requested change touches live runtime fields (`walletAddress`, `settlementConfig`, `symbol`, `chainId`, `protocol`) and the tool reports missing companion fields, ask only for those missing companion fields before retrying.
+6. For live wallet updates, prefer `walletAddress` when the user gives a single wallet. Use `settlementConfig` only when they explicitly provide both master and agent addresses.
 7. Never send both `walletAddress` and `settlementConfig` in the same `update_agent` call.
 8. Do not ask the user for `buyLimit` on updates. Live sizing is derived server-side. Do not ask for `initialCapital` unless the user is explicitly switching the agent from live mode to paper mode.
-9. **Copied agents — switching source:** If the user wants to switch which source agent a copied agent follows, pass `copiedFromAgentId` to `update_agent`. Do not pass `isPrivate` together with `copiedFromAgentId` (copied agents are always private).
+9. If the user wants to switch which source agent a copied agent follows, pass `copiedFromAgentId` to `update_agent`. Do not pass `isPrivate` together with `copiedFromAgentId`.
 10. Report the `tradingData` result. If the tool returns `warnings`, surface them verbatim.
+
+## Reactivate an agent
+1. If the user has not specified an agent ID, call `list_my_agents` first and ask which inactive agent should be re-enabled.
+2. Use the normal update flow to set the agent active again when the available toolset supports it.
+3. Report whether the agent is active again and surface any backend warning verbatim.
 
 ## Delete an agent
 1. If the user hasn't specified an agent ID, call `list_my_agents` first and ask which one to delete.
-2. Confirm with the user before deleting — show the agent name and ID.
-3. Call `delete_agent` with the `agentId`. The server handles all delegation (trading-bot and settlement) internally.
+2. Confirm with the user before deleting. Show the agent name and ID.
+3. Call `delete_agent` with the `agentId`. The server handles downstream delegation internally.
 4. Report `tradingData.ok`. If it failed, say deletion may be incomplete.

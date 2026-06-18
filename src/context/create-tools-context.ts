@@ -1,6 +1,5 @@
 import { Keys, Nip19, Signer } from "@scom/scom-signer";
 import { Contract, JsonRpcProvider, Wallet, getAddress } from "ethers";
-import { assertBillingNetworkConsistent } from "../billing-stage.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -50,11 +49,23 @@ export function createToolsContext(api: any) {
   const defaultHyperliquidNetwork: string = pluginConfig.defaultHyperliquidNetwork;
   const defaultHyperliquidChainId: 998 | 999 = defaultHyperliquidNetwork === "mainnet" ? 999 : 998;
   const webUrl: string = pluginConfig.webUrl;
-  const billingEvmConfig = buildBillingEvmConfig(pluginConfig);
-  assertBillingNetworkConsistent({
-    rpcUrl: billingEvmConfig.rpcUrl,
-    explorerUrl: billingEvmConfig.eligibleNftExplorerUrl,
-    defaultHyperliquidNetwork,
+  const billingEvmConfig = buildBillingEvmConfig({
+    bscBillingRpcUrl: "http://localhost:8545",
+    bscBillingRouterAddress: "0x0000000000000000000000000000000000000000",
+    bscBillingWethAddress: "0x0000000000000000000000000000000000000000",
+    bscBillingTokenAddress: "0x0000000000000000000000000000000000000000",
+    bscBillingTokenSymbol: "OSWAP",
+    bscBillingTokenDecimals: 18,
+    bscBillingVaultAddress: "0x0000000000000000000000000000000000000000",
+    bscEligibleNftAddress: "0x0000000000000000000000000000000000000000",
+    bscEligibleNftExplorerUrl: "",
+    bscEligibleNftName: "Disabled",
+    bscEligibleNftMinimumStake: 0,
+    bscEligibleNftProtocolFee: 0,
+    bscEligibleNftTotalMintingFee: 0,
+    billingSwapSlippageBps: 0,
+    billingPollIntervalMs: 1000,
+    billingPollTimeoutMs: 1000,
   });
   const billingProvider = new JsonRpcProvider(billingEvmConfig.rpcUrl);
 
@@ -412,15 +423,8 @@ export function createToolsContext(api: any) {
   }
 
   async function fetchBillingBypassStatus(npub: string): Promise<boolean> {
-    const url = `${baseUrl}/api/is-whitelisted/${npub}`;
-    debugLog("billing", "api.req billing-bypass-status", { url, npub });
-    const res = await fetch(url);
-    const body = await res.json().catch(async () => await res.text().catch(() => null));
-    debugLog("billing", "api.res billing-bypass-status", { status: res.status, body });
-    if (!res.ok) {
-      throw new Error(`billing bypass check failed: ${res.status} ${responseErrorMessage(body)}`);
-    }
-    return Boolean(extractApiData(body)?.isWhitelisted);
+    debugLog("billing", "api.req billing-bypass-status", { npub, bypassed: true });
+    return true;
   }
 
   async function fetchEligibleNftConfigs(): Promise<EligibleNftConfig[]> {
@@ -610,7 +614,6 @@ export function createToolsContext(api: any) {
 
     const billingBypassed = await fetchBillingBypassStatus(input.npub);
     if (billingBypassed) {
-      const billingWallet = buildBillingWallet();
       return {
         prepared: {
           identity: {
@@ -623,12 +626,7 @@ export function createToolsContext(api: any) {
             canSkipNftPurchase: true,
           },
           wallet: {
-            address: billingWallet.address,
-            networkLabel: billingEvmConfig.networkLabel,
-            tokenSymbol: billingEvmConfig.tokenSymbol,
-            tokenAddress: billingEvmConfig.tokenAddress,
-            vaultAddress: billingEvmConfig.vaultAddress,
-            usesNostrPrivateKey: true,
+            usesNostrPrivateKey: false,
           },
           nft: {
             required: false,
@@ -646,7 +644,7 @@ export function createToolsContext(api: any) {
             oswapForInitialVaultCredit: "0",
             requiredOswap: "0",
             oswapShortfall: "0",
-            note: "No upfront billing setup is required for this account.",
+            note: "No payment setup is required for this account.",
           },
           executionPlan: {
             agentName: input.name,
@@ -658,7 +656,6 @@ export function createToolsContext(api: any) {
             depositToVault: "0",
           },
         },
-        billingWallet,
         operatingFeeRaw: 0n,
         protocolFeeRaw: 0n,
         strategyFeeRaw: 0n,
@@ -680,7 +677,7 @@ export function createToolsContext(api: any) {
         hasEligibleNft: false,
         nftApprovalRequired: false,
         vaultApprovalRequired: false,
-        billingPeriodSeconds: 2_592_000,
+        billingPeriodSeconds: 0,
         selectedEligibleNft: undefined,
         ownedEligibleNft: undefined,
       };
