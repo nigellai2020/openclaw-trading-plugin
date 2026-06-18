@@ -55,7 +55,7 @@
       },
       "hyperliquidManagementUrl": {
         "type": "string",
-        "default": "https://hyperliquid-management.pages.dev"
+        "default": "https://hyperliquid.openswap.xyz"
       },
       "enableAmmSpot": {
         "type": "boolean",
