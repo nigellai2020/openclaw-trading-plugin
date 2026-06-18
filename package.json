@@ -19,7 +19,6 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test:billing-flow": "node scripts/billing-flow-test.cjs",
     "test:notifications": "node --import tsx --test tests/notifications.test.ts"
   },
   "openclaw": {

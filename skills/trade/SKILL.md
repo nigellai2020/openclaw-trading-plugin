@@ -16,7 +16,6 @@ description: Guide the user through creating a new trading agent. Use when the u
 6. After deployment, present the created agent summary, final activation state, and any warnings returned by the backend.
 
 ## Presentation rules
-- Do not mention payment, billing, subscriptions, vault credit, NFT eligibility, OSWAP, or BNB top-ups in this workflow.
 - Keep the confirmation summary short and operational.
 - Show full wallet addresses when the user needs to verify wallet selection.
 - When copying an agent, clearly identify the source agent and call out any inherited fields.

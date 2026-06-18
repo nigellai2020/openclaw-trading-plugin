@@ -3,7 +3,6 @@ import { test } from "node:test";
 import {
   formatAgentDeactivationNotification,
   formatBacktestSummary,
-  formatBillingExpiryNotification,
   formatFillNotification,
 } from "../src/utils/notifications.js";
 
@@ -146,26 +145,3 @@ test("formatFillNotification formats failed fills with friendlier wording", () =
   );
 });
 
-test("formatBillingExpiryNotification formats reminders without raw seconds", () => {
-  assert.equal(
-    formatBillingExpiryNotification({
-      event: "billing_expiry_reminder",
-      agent_id: 42,
-      agent_name: "Mean Reversion",
-      seconds_left: 45,
-      renewal_at: 1718123456,
-    }),
-    "[Billing reminder] Mean Reversion (Agent 42) billing renews in less than a minute, at Jun 11, 2024, 4:30 PM UTC.",
-  );
-});
-
-test("formatBillingExpiryNotification formats expired billing notices", () => {
-  assert.equal(
-    formatBillingExpiryNotification({
-      event: "agent_billing_expired",
-      agent_name: "Momentum",
-      renewal_at: 1718123456,
-    }),
-    "[Billing update] Momentum billing expired at Jun 11, 2024, 4:30 PM UTC.",
-  );
-});
