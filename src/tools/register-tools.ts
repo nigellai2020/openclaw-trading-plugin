@@ -1,14 +1,9 @@
 import { Type } from "@sinclair/typebox";
 import { Crypto, Keys, Nip19 } from "@scom/scom-signer";
-import { Contract, Wallet, getAddress } from "ethers";
 import {
-  ERC20_ABI,
   getEvmChainConfig,
-  NFT_ABI,
   PERP_ALLOWED_CHAIN_IDS,
-  ROUTER_ABI,
   SPOT_ALLOWED_CHAIN_IDS,
-  VAULT_ABI,
   validateChainIdForMarketType,
 } from "../constants/trading.js";
 import {
@@ -17,11 +12,9 @@ import {
 } from "../context/create-tools-context.js";
 import { SimulationConfig, SimulationConfigPatch, Strategy } from "../schemas/strategy.js";
 import { registerNostrNotifications } from "./register-nostr-notifications.js";
-import type { EthHeaders, PreparedAgentCreationContext } from "../types/billing.js";
 import { getAuthHeader, loadKeys, persistKeyToConfig } from "../utils/auth.js";
 import { sanitizeBacktestResultResponse } from "../utils/backtest-result.js";
 import { normalizeBacktestTimeRange } from "../utils/backtest-time.js";
-import { formatAmount } from "../utils/billing.js";
 import { fetchEvmWalletBalances, textResult } from "../utils/live-trading.js";
 import {
   deleteTelegramMessage,
@@ -30,7 +23,6 @@ import {
   type TelegramInlineKeyboard,
 } from "../utils/notifications.js";
 import { fetchSupportedPairsFromApi } from "../utils/supported-pairs.js";
-import { decideUpdateAgentBilling, type UpdateAgentBillingRequirement } from "../update-agent-billing.js";
 
 type AgentTradeRange = "12h" | "24h" | "1d" | "3d" | "7d" | "30d" | "all";
 type TokenPriceValidationIssue = {
@@ -629,340 +621,6 @@ export function registerHyperliquidSetupRefreshInteractiveHandler(api: any, inpu
   return true;
 }
 
-function buildBillingBreakdown(
-  preparedContext: PreparedAgentCreationContext,
-  billingEvmConfig: { networkLabel: string; tokenSymbol: string },
-) {
-  const wallet = preparedContext.prepared.wallet;
-  const fees = preparedContext.prepared.fees;
-  const funding = preparedContext.prepared.funding;
-  const gas = preparedContext.prepared.gas;
-  const tokenSymbol = wallet.tokenSymbol ?? billingEvmConfig.tokenSymbol;
-  const bnbForSwapMax = funding?.bnbForSwapMax ?? "0";
-  const bnbForGas = funding?.bnbForGas ?? "0";
-  const totalBnbNeeded = funding?.totalBnbNeeded ?? "0";
-  const bnbShortfall = funding?.bnbShortfall ?? "0";
-  const oswapShortfall = fees.oswapShortfall ?? "0";
-
-  let summary = `Need up to ${totalBnbNeeded} BNB total on ${wallet.networkLabel ?? billingEvmConfig.networkLabel} for billing.`;
-  if (Number(oswapShortfall) > 0) {
-    summary =
-      `Need up to ${totalBnbNeeded} BNB total on ${wallet.networkLabel ?? billingEvmConfig.networkLabel} for billing: ` +
-      `${bnbForSwapMax} BNB max to swap into ${oswapShortfall} ${tokenSymbol} plus ${bnbForGas} BNB for gas.`;
-  } else if (Number(bnbShortfall) > 0) {
-    summary =
-      `Existing ${tokenSymbol} covers billing. Need ${bnbForGas} BNB for gas on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}.`;
-  } else {
-    summary = `Existing ${tokenSymbol} and BNB balances already cover the billing requirement on ${wallet.networkLabel ?? billingEvmConfig.networkLabel}.`;
-  }
-
-  return {
-    summary,
-    network: wallet.networkLabel ?? billingEvmConfig.networkLabel,
-    tokenSymbol,
-    billingWalletAddress: wallet.address ?? null,
-    billingVaultAddress: wallet.vaultAddress ?? null,
-    billingTokenAddress: wallet.tokenAddress ?? null,
-    walletBalances: {
-      oswap: wallet.oswapBalance ?? null,
-      bnb: wallet.bnbBalance ?? null,
-    },
-    fees: {
-      operatingFee: fees.operatingFee,
-      protocolFee: fees.protocolFee,
-      strategyFee: fees.strategyFee,
-      firstBillingAmount: fees.firstBillingAmount,
-      existingVaultCredit: fees.existingVaultCredit,
-      targetVaultCredit: fees.targetVaultCredit,
-      oswapForNft: fees.oswapForNft,
-      oswapForInitialVaultCredit: fees.oswapForInitialVaultCredit,
-      requiredOswap: fees.requiredOswap,
-      oswapShortfall,
-    },
-    funding: funding
-      ? {
-          bnbForSwapQuoted: funding.bnbForSwapQuoted,
-          bnbForSwapMax,
-          bnbForGas,
-          totalBnbNeeded,
-          bnbShortfall,
-        }
-      : null,
-    gas: gas
-      ? {
-          gasPriceGwei: gas.gasPriceGwei,
-          steps: gas.steps,
-        }
-      : null,
-  };
-}
-
-function buildInitialBillingTransactions(preparedContext: PreparedAgentCreationContext): Record<string, any> {
-  return {
-    swap: { ok: preparedContext.oswapShortfallRaw === 0n, skipped: preparedContext.oswapShortfallRaw === 0n },
-    nftApproval: { ok: !preparedContext.nftApprovalRequired, skipped: !preparedContext.nftApprovalRequired },
-    nftMint: { ok: preparedContext.oswapForNftRaw === 0n, skipped: preparedContext.oswapForNftRaw === 0n },
-    vaultApproval: { ok: !preparedContext.vaultApprovalRequired, skipped: !preparedContext.vaultApprovalRequired },
-    vaultDeposit: { ok: preparedContext.oswapForInitialVaultCreditRaw === 0n, skipped: preparedContext.oswapForInitialVaultCreditRaw === 0n },
-  };
-}
-
-async function executeBillingFundingTransactions(input: {
-  preparedContext: PreparedAgentCreationContext;
-  billingWallet: Wallet;
-  billingTransactions: Record<string, any>;
-  billingEvmConfig: {
-    networkLabel: string;
-    tokenSymbol: string;
-    tokenDecimals: number;
-    routerAddress: string;
-    wethAddress: string;
-    tokenAddress: string;
-    vaultAddress: string;
-  };
-  buildBillingHeaders: (wallet: Wallet) => Promise<EthHeaders>;
-  waitForVaultCredit: (
-    wallet: Wallet,
-    minimumAvailableBalanceRaw: bigint,
-  ) => Promise<{ availableBalanceRaw: bigint }>;
-}): Promise<EthHeaders> {
-  const {
-    preparedContext,
-    billingWallet,
-    billingTransactions,
-    billingEvmConfig,
-    buildBillingHeaders,
-    waitForVaultCredit,
-  } = input;
-
-  if (preparedContext.bnbShortfallRaw > 0n) {
-    throw new Error(
-      `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`,
-    );
-  }
-
-  const swapPath = [billingEvmConfig.wethAddress, billingEvmConfig.tokenAddress];
-  const routerContract = new Contract(billingEvmConfig.routerAddress, ROUTER_ABI, billingWallet) as any;
-  const tokenContract = new Contract(billingEvmConfig.tokenAddress, ERC20_ABI, billingWallet) as any;
-  const vaultContract = new Contract(billingEvmConfig.vaultAddress, VAULT_ABI, billingWallet) as any;
-  const selectedEligibleNft = preparedContext.selectedEligibleNft;
-  const nftContract = selectedEligibleNft
-    ? new Contract(selectedEligibleNft.contractAddress, NFT_ABI, billingWallet) as any
-    : undefined;
-
-  if (!selectedEligibleNft && (preparedContext.nftApprovalRequired || preparedContext.oswapForNftRaw > 0n)) {
-    throw new Error("No active eligible NFT config available");
-  }
-
-  const failBilling = (step: string, error: string): never => {
-    billingTransactions[step] = { ok: false, skipped: false, error };
-    throw new Error(error);
-  };
-
-  if (preparedContext.oswapShortfallRaw > 0n) {
-    try {
-      const deadline = Math.floor(Date.now() / 1000) + 1_200;
-      const swapTx = await routerContract.swapETHForExactTokens(
-        preparedContext.oswapShortfallRaw,
-        swapPath,
-        billingWallet.address,
-        deadline,
-        { value: preparedContext.bnbForSwapMaxRaw },
-      );
-      const receipt = await swapTx.wait();
-      billingTransactions.swap = {
-        ok: true,
-        skipped: false,
-        txHash: receipt.hash,
-        oswapAmount: formatAmount(preparedContext.oswapShortfallRaw, billingEvmConfig.tokenDecimals),
-        maxBnbAmount: formatAmount(preparedContext.bnbForSwapMaxRaw, 18, 8),
-      };
-    } catch (e: any) {
-      failBilling("swap", `BNB to ${billingEvmConfig.tokenSymbol} swap failed: ${e.message}`);
-    }
-  }
-
-  if (preparedContext.nftApprovalRequired) {
-    try {
-      const approveTx = await tokenContract.approve(
-        selectedEligibleNft!.contractAddress,
-        preparedContext.oswapForNftRaw,
-      );
-      const receipt = await approveTx.wait();
-      billingTransactions.nftApproval = {
-        ok: true,
-        skipped: false,
-        txHash: receipt.hash,
-        amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
-      };
-    } catch (e: any) {
-      failBilling("nftApproval", `NFT approval failed: ${e.message}`);
-    }
-  }
-
-  if (preparedContext.oswapForNftRaw > 0n) {
-    try {
-      const mintTx = await nftContract!.stake(preparedContext.oswapForNftRaw);
-      const receipt = await mintTx.wait();
-      billingTransactions.nftMint = {
-        ok: true,
-        skipped: false,
-        txHash: receipt.hash,
-        amount: formatAmount(preparedContext.oswapForNftRaw, billingEvmConfig.tokenDecimals),
-      };
-    } catch (e: any) {
-      failBilling("nftMint", `NFT mint failed: ${e.message}`);
-    }
-  }
-
-  if (preparedContext.vaultApprovalRequired) {
-    try {
-      const approveTx = await tokenContract.approve(
-        billingEvmConfig.vaultAddress,
-        preparedContext.oswapForInitialVaultCreditRaw,
-      );
-      const receipt = await approveTx.wait();
-      billingTransactions.vaultApproval = {
-        ok: true,
-        skipped: false,
-        txHash: receipt.hash,
-        amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-      };
-    } catch (e: any) {
-      failBilling("vaultApproval", `Vault approval failed: ${e.message}`);
-    }
-  }
-
-  if (preparedContext.oswapForInitialVaultCreditRaw > 0n) {
-    try {
-      const depositTx = await vaultContract.deposit(
-        billingWallet.address,
-        preparedContext.oswapForInitialVaultCreditRaw,
-      );
-      const receipt = await depositTx.wait();
-      const indexedBalance = await waitForVaultCredit(
-        billingWallet,
-        preparedContext.existingVaultCreditRaw + preparedContext.oswapForInitialVaultCreditRaw,
-      );
-      billingTransactions.vaultDeposit = {
-        ok: true,
-        skipped: false,
-        txHash: receipt.hash,
-        amount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-        indexedAvailableBalance: formatAmount(indexedBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
-      };
-    } catch (e: any) {
-      failBilling("vaultDeposit", `Vault deposit failed: ${e.message}`);
-    }
-  }
-
-  return await buildBillingHeaders(billingWallet);
-}
-
-function buildAgentBillingTopUpPreflightResult(input: {
-  agentId: number;
-  agentProfile: any;
-  preparedContext: PreparedAgentCreationContext;
-  nextRenewalAt?: string | null;
-}) {
-  const { agentId, agentProfile, preparedContext, nextRenewalAt } = input;
-  const prepared = preparedContext.prepared;
-  const symbol = typeof agentProfile?.pair === "string" && agentProfile.pair.trim()
-    ? agentProfile.pair.trim()
-    : typeof agentProfile?.symbol === "string" && agentProfile.symbol.trim()
-      ? agentProfile.symbol.trim()
-      : prepared.executionPlan.symbol;
-
-  const actions = prepared.executionPlan.actions
-    .filter((action) => !action.startsWith("Create "))
-    .concat(`Add billing vault credit for agent "${agentProfile?.name ?? prepared.executionPlan.agentName}"${symbol ? ` (${symbol})` : ""}.`);
-
-  return {
-    ...prepared,
-    agent: {
-      id: agentId,
-      name: agentProfile?.name ?? prepared.executionPlan.agentName,
-      mode: agentProfile?.mode ?? prepared.executionPlan.mode,
-      marketType: agentProfile?.marketType === "perp" ? "perp" : prepared.executionPlan.marketType,
-      symbol,
-    },
-    subscription: prepared.subscription
-      ? {
-          ...prepared.subscription,
-          estimatedEndTime: nextRenewalAt ?? prepared.subscription.estimatedEndTime,
-        }
-      : undefined,
-    executionPlan: {
-      ...prepared.executionPlan,
-      symbol,
-      actions,
-    },
-    billingTopUp: {
-      agentId,
-      nextBillingDateEstimate: nextRenewalAt ?? prepared.subscription?.estimatedEndTime ?? null,
-      subscriptionMatched: nextRenewalAt != null,
-    },
-    confirmationRequired: true,
-    nextStep: "present_vault_credit_top_up_checkout_and_wait_for_explicit_confirmation",
-  };
-}
-
-async function loadAgentBillingTopUpContext(input: {
-  agentId: number;
-  npub: string;
-  publicKey: string;
-  privateKey: string;
-  fetchPublicAgentProfile: (agentId: number) => Promise<any>;
-  prepareAgentCreationContext: (input: {
-    name: string;
-    mode?: string;
-    marketType?: string;
-    symbol?: string;
-    agentId?: number;
-    npub: string;
-    publicKey: string;
-    privateKey: string;
-  }) => Promise<PreparedAgentCreationContext>;
-  fetchBillingSubscriptionsSnapshot: (wallet: Wallet) => Promise<{
-    subscriptions: any[];
-    walletRegistered: boolean;
-  }>;
-}): Promise<{
-  agentProfile: any;
-  preparedContext: PreparedAgentCreationContext;
-  nextRenewalAt: string | null;
-}> {
-  const agentProfile = await input.fetchPublicAgentProfile(input.agentId);
-  const mode = agentProfile?.mode === "live" ? "live" : "paper";
-  const marketType = agentProfile?.marketType === "perp" ? "perp" : "spot";
-  const symbol = typeof agentProfile?.pair === "string" && agentProfile.pair.trim()
-    ? agentProfile.pair.trim()
-    : typeof agentProfile?.symbol === "string" && agentProfile.symbol.trim()
-      ? agentProfile.symbol.trim()
-      : undefined;
-  const preparedContext = await input.prepareAgentCreationContext({
-    name: agentProfile?.name ?? `Agent ${input.agentId}`,
-    mode,
-    marketType,
-    symbol,
-    agentId: input.agentId,
-    npub: input.npub,
-    publicKey: input.publicKey,
-    privateKey: input.privateKey,
-  });
-
-  let nextRenewalAt: string | null = null;
-  if (preparedContext.billingWallet) {
-    try {
-      const { subscriptions } = await input.fetchBillingSubscriptionsSnapshot(preparedContext.billingWallet);
-      const matchedSubscription = subscriptions.find((subscription: any) => Number(subscription.agent_id) === input.agentId);
-      nextRenewalAt = matchedSubscription?.next_renewal_at ?? null;
-    } catch {}
-  }
-
-  return { agentProfile, preparedContext, nextRenewalAt };
-}
-
 function resolveChainLabel(chainId: number | null | undefined): string | null {
   if (chainId == null) return null;
   if (chainId === 998) return "Hyperliquid Testnet";
@@ -982,7 +640,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     defaultHyperliquidNetwork,
     defaultHyperliquidChainId,
     webUrl,
-    billingEvmConfig,
     debugLog,
     responseErrorMessage,
     resolveMarketType,
@@ -998,15 +655,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     fetchAgentSettingsForUpdate,
     fetchWalletsForUpdate,
     fetchPublicAgentProfile,
-    buildBillingWallet,
-    buildBillingHeaders,
-    ensureBillingWalletRegistered,
-    fetchBillingBypassStatus,
-    fetchBillingBalanceSnapshot,
-    fetchBillingSubscriptions,
-    fetchBillingSubscriptionsSnapshot,
-    prepareAgentCreationContext,
-    waitForVaultCredit,
   } = ctx;
 
   registerHyperliquidSetupRefreshCommand(api, {
@@ -1423,333 +1071,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
   });
 
   api.registerTool({
-    name: "get_billing_subscriptions",
-    description: "List billing subscriptions for the billing wallet derived from nostrPrivateKey. Automatically ensures the billing wallet is registered before fetching subscriptions.",
-    parameters: Type.Object({}),
-    async execute() {
-      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
-      const billingWallet = buildBillingWallet();
-      debugLog("get_billing_subscriptions", "entry", {
-        walletAddress: billingWallet.address,
-        usesNostrPrivateKey: true,
-      });
-      try {
-        const registration = await ensureBillingWalletRegistered({
-          npub,
-          publicKey,
-          privateKey,
-          wallet: billingWallet,
-        });
-        const { subscriptions, walletRegistered } = await fetchBillingSubscriptionsSnapshot(billingWallet);
-        const result = {
-          walletAddress: billingWallet.address,
-          walletRegistered,
-          billingWalletRegistration: registration,
-          subscriptions,
-        };
-        debugLog("get_billing_subscriptions", "result", result);
-        return textResult(result);
-      } catch (e: any) {
-        return textResult({
-          walletAddress: billingWallet.address,
-          walletRegistered: false,
-          error: e.message,
-        });
-      }
-    },
-  });
-
-  api.registerTool({
-    name: "prepare_agent_vault_credit_top_up",
-    description: "Read-only preflight for adding billing vault credit to an existing agent. Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is ready, calculates any OSWAP top-up and BNB needed, and returns funding instructions before any on-chain transaction. This tool does not renew or reactivate an agent by itself. OpenClaw must present this result to the user and wait for explicit confirmation or funding completion before calling top_up_agent_vault_credit.",
-    parameters: Type.Object({
-      agentId: Type.Number({ description: "Agent ID whose billing vault credit should be increased" }),
-    }),
-    async execute(_id: string, params: { agentId: number }) {
-      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
-      debugLog("prepare_agent_vault_credit_top_up", "entry", {
-        agentId: params.agentId,
-        usesNostrPrivateKey: true,
-      });
-
-      try {
-        const { agentProfile, preparedContext, nextRenewalAt } = await loadAgentBillingTopUpContext({
-          agentId: params.agentId,
-          npub,
-          publicKey,
-          privateKey,
-          fetchPublicAgentProfile,
-          prepareAgentCreationContext,
-          fetchBillingSubscriptionsSnapshot,
-        });
-        const result = buildAgentBillingTopUpPreflightResult({
-          agentId: params.agentId,
-          agentProfile,
-          preparedContext,
-          nextRenewalAt,
-        });
-        debugLog("prepare_agent_vault_credit_top_up", "result", result);
-        return textResult(result);
-      } catch (e: any) {
-        return textResult({ error: e.message, agentId: params.agentId });
-      }
-    },
-  });
-
-  api.registerTool({
-    name: "top_up_agent_vault_credit",
-    description: "Execute the billing vault-credit top-up flow for an existing agent after the user has topped up BNB in the billing wallet. Reuses the same swap, approval, and vault deposit logic as deploy_agent, but does not create, renew, or reactivate the agent itself. Call this tool directly from the current session only after explicit user confirmation.",
-    parameters: Type.Object({
-      agentId: Type.Number({ description: "Agent ID whose billing vault credit should be increased" }),
-    }),
-    async execute(_id: string, params: { agentId: number }) {
-      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
-      const result: Record<string, unknown> = {
-        billingTopUp: {
-          agentId: params.agentId,
-        },
-      };
-
-      let agentProfile: any;
-      let preparedContext: PreparedAgentCreationContext;
-      let nextRenewalAt: string | null = null;
-      try {
-        const loaded = await loadAgentBillingTopUpContext({
-          agentId: params.agentId,
-          npub,
-          publicKey,
-          privateKey,
-          fetchPublicAgentProfile,
-          prepareAgentCreationContext,
-          fetchBillingSubscriptionsSnapshot,
-        });
-        agentProfile = loaded.agentProfile;
-        preparedContext = loaded.preparedContext;
-        nextRenewalAt = loaded.nextRenewalAt;
-      } catch (e: any) {
-        return textResult({ error: e.message, ...result });
-      }
-
-      const preflight = buildAgentBillingTopUpPreflightResult({
-        agentId: params.agentId,
-        agentProfile,
-        preparedContext,
-        nextRenewalAt,
-      });
-      result.agent = preflight.agent;
-
-      if (!preparedContext.prepared.billing.required) {
-        result.billing = {
-          required: false,
-          bypassed: true,
-          reason: "billing_not_required",
-        };
-        return textResult(result);
-      }
-
-      const activeBillingWallet = preparedContext.billingWallet;
-      if (!activeBillingWallet) {
-        return textResult({ error: "Billing wallet could not be derived from nostrPrivateKey", ...result });
-      }
-
-      const billingTransactions = buildInitialBillingTransactions(preparedContext);
-      result.billing = {
-        required: true,
-        walletAddress: activeBillingWallet.address,
-        preflight,
-        confirmationRequired: true,
-        transactions: billingTransactions,
-      };
-
-      if (preparedContext.bnbShortfallRaw > 0n) {
-        return textResult({
-          error: `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`,
-          billingShortfall: buildBillingBreakdown(preparedContext, billingEvmConfig),
-          ...result,
-        });
-      }
-
-      try {
-        await executeBillingFundingTransactions({
-          preparedContext,
-          billingWallet: activeBillingWallet,
-          billingTransactions,
-          billingEvmConfig,
-          buildBillingHeaders,
-          waitForVaultCredit,
-        });
-      } catch (e: any) {
-        return textResult({
-          error: e.message,
-          ...result,
-        });
-      }
-
-      try {
-        const [postBalance, subscriptions] = await Promise.all([
-          fetchBillingBalanceSnapshot(activeBillingWallet),
-          fetchBillingSubscriptions(activeBillingWallet),
-        ]);
-        const matchedSubscription = subscriptions.find((subscription: any) => Number(subscription.agent_id) === params.agentId);
-        (result.billing as any).result = {
-          nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
-          vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-          updatedVaultCredit: formatAmount(postBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
-          pendingWithdrawalCredit: formatAmount(postBalance.pendingWithdrawalBalanceRaw, billingEvmConfig.tokenDecimals),
-          feeBreakdown: preparedContext.prepared.fees,
-          agentId: params.agentId,
-          agentName: agentProfile?.name ?? preflight.agent.name,
-          nextBillingDateEstimate: matchedSubscription?.next_renewal_at
-            ?? new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
-        };
-      } catch (e: any) {
-        (result.billing as any).result = {
-          nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
-          vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-          feeBreakdown: preparedContext.prepared.fees,
-          agentId: params.agentId,
-          agentName: agentProfile?.name ?? preflight.agent.name,
-          nextBillingDateEstimate: new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
-          warning: e.message,
-        };
-      }
-
-      debugLog("top_up_agent_vault_credit", "result", result);
-      return textResult(result);
-    },
-  });
-
-  api.registerTool({
-    name: "reactivate_expired_agent",
-    description: "Reactivate an expired agent only when the current billing vault credit is already sufficient. If vault credit is short, this tool explains how much BNB to fund into the billing wallet and points the user to the vault-credit top-up flow before retrying reactivation.",
-    parameters: Type.Object({
-      agentId: Type.Number({ description: "Expired agent ID to reactivate" }),
-    }),
-    async execute(_id: string, params: { agentId: number }) {
-      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
-      const auth = getAuthHeader(publicKey, privateKey);
-      const result: Record<string, unknown> = {
-        reactivation: {
-          agentId: params.agentId,
-        },
-      };
-
-      let agentProfile: any;
-      let preparedContext: PreparedAgentCreationContext;
-      let nextRenewalAt: string | null = null;
-      try {
-        const loaded = await loadAgentBillingTopUpContext({
-          agentId: params.agentId,
-          npub,
-          publicKey,
-          privateKey,
-          fetchPublicAgentProfile,
-          prepareAgentCreationContext,
-          fetchBillingSubscriptionsSnapshot,
-        });
-        agentProfile = loaded.agentProfile;
-        preparedContext = loaded.preparedContext;
-        nextRenewalAt = loaded.nextRenewalAt;
-      } catch (e: any) {
-        return textResult({ error: e.message, ...result });
-      }
-
-      const preflight = buildAgentBillingTopUpPreflightResult({
-        agentId: params.agentId,
-        agentProfile,
-        preparedContext,
-        nextRenewalAt,
-      });
-      const activeBillingWallet = preparedContext.billingWallet;
-      result.agent = preflight.agent;
-
-      if (preparedContext.prepared.billing.required && preparedContext.oswapForInitialVaultCreditRaw > 0n) {
-        const needsFunding = preparedContext.bnbShortfallRaw > 0n;
-        return textResult({
-          error: needsFunding
-            ? `Insufficient vault credit to reactivate agent ${params.agentId}. Send only ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB to the billing wallet, then add vault credit before retrying reactivation.`
-            : `Insufficient vault credit to reactivate agent ${params.agentId}. The billing wallet is already funded enough for the top-up flow; add vault credit first, then retry reactivation.`,
-          agent: preflight.agent,
-          reactivation: {
-            agentId: params.agentId,
-            status: "insufficient_vault_credit",
-            walletAddress: activeBillingWallet?.address,
-            currentVaultCredit: preflight.fees.existingVaultCredit,
-            requiredTopUp: preflight.fees.oswapForInitialVaultCredit,
-            nextBillingDateEstimate: preflight.billingTopUp?.nextBillingDateEstimate ?? null,
-            depositNetwork: preflight.wallet.networkLabel,
-            bnbShortfall: preflight.funding?.bnbShortfall ?? null,
-            nextStep: needsFunding
-              ? "fund_billing_wallet_then_run_top_up_agent_vault_credit"
-              : "run_top_up_agent_vault_credit",
-            recommendedTools: {
-              preflight: "prepare_agent_vault_credit_top_up",
-              execute: "top_up_agent_vault_credit",
-            },
-          },
-          billingShortfall: buildBillingBreakdown(preparedContext, billingEvmConfig),
-        });
-      }
-
-      try {
-        const res = await fetch(`${baseUrl}/api/agent/${params.agentId}/reactivate`, {
-          method: "POST",
-          headers: { Authorization: auth },
-          body: JSON.stringify({}),
-        });
-        const body = await parseResponseBody(res);
-        if (!res.ok) {
-          return textResult({
-            error: `reactivate_expired_agent failed: ${res.status} ${responseErrorMessage(body)}`,
-            agent: preflight.agent,
-            reactivation: {
-              agentId: params.agentId,
-              status: "failed",
-              walletAddress: activeBillingWallet?.address,
-              currentVaultCredit: preflight.fees.existingVaultCredit,
-              nextBillingDateEstimate: preflight.billingTopUp?.nextBillingDateEstimate ?? null,
-            },
-          });
-        }
-
-        const responseData = body?.data ?? body;
-        let updatedVaultCredit: string | undefined;
-        let warning: string | undefined;
-        if (activeBillingWallet) {
-          try {
-            const postBalance = await fetchBillingBalanceSnapshot(activeBillingWallet);
-            updatedVaultCredit = formatAmount(postBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals);
-          } catch (e: any) {
-            warning = e?.message;
-          }
-        }
-
-        const successResult = {
-          agent: preflight.agent,
-          reactivation: {
-            agentId: params.agentId,
-            status: "reactivated",
-            walletAddress: activeBillingWallet?.address,
-            currentVaultCredit: preflight.fees.existingVaultCredit,
-            updatedVaultCredit,
-            nextBillingDateEstimate: responseData?.next_renewal_at ?? preflight.billingTopUp?.nextBillingDateEstimate ?? null,
-            response: responseData,
-            ...(warning ? { warning } : {}),
-          },
-        };
-        debugLog("reactivate_expired_agent", "result", successResult);
-        return textResult(successResult);
-      } catch (e: any) {
-        return textResult({
-          error: e.message,
-          agent: preflight.agent,
-          ...result,
-        });
-      }
-    },
-  });
-
-  api.registerTool({
     name: "get_agent",
     description: "Get details of a trading agent by ID",
     parameters: Type.Object({
@@ -1778,10 +1099,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       strategyDescription: Type.Optional(Type.String({ description: "Updated human-readable strategy description" })),
       isActive: Type.Optional(Type.Boolean({ description: "Enable or disable the agent" })),
       leverage: Type.Optional(Type.Number({ description: "Updated leverage multiplier" })),
-      strategyFeePerPeriod: Type.Optional(Type.Union([
-        Type.Number({ description: "Updated strategy fee per billing period" }),
-        Type.Null(),
-      ])),
       mode: Type.Optional(Type.String({ description: '"paper" or "live"' })),
       marketType: Type.Optional(Type.String({ description: '"spot" or "perp"' })),
       symbol: Type.Optional(Type.String({ description: 'Updated trader symbol, e.g. "ETH/USDC"' })),
@@ -1811,7 +1128,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         strategyDescription?: string;
         isActive?: boolean;
         leverage?: number;
-        strategyFeePerPeriod?: number | null;
         mode?: string;
         marketType?: string;
         symbol?: string;
@@ -1834,7 +1150,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         copiedFromAgentId?: number;
       },
     ) {
-      const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
+      const { privateKey, publicKey } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
       const signedAt = Math.floor(Date.now() / 1000);
       const requestedFields = [
@@ -1845,7 +1161,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         "strategyDescription",
         "isActive",
         "leverage",
-        "strategyFeePerPeriod",
         "mode",
         "marketType",
         "symbol",
@@ -2048,16 +1363,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         null;
       const currentMasterWalletAddress = currentWalletRecord?.master_wallet_address ?? null;
 
-      const mainFieldKeys = [
-        "name",
-        "description",
-        "avatarUrl",
-        "strategy",
-        "strategyDescription",
-        "isActive",
-        "leverage",
-        "strategyFeePerPeriod",
-      ];
       // Settlement-specific fields (excluding chainId which is needed for both paper and live)
       const settlementSpecificFields = [
         "settlementConfig",
@@ -2150,62 +1455,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         result.preflight.derivedSimulationConfig = simulationConfigPayload;
       }
 
-      const mainUpdateRequested = mainFieldKeys.some((field) => hasOwnField(params, field));
       {
-        const tradingDataResult: Record<string, unknown> = {};
-        let billingHeaders: Record<string, string> = {};
-        let billingRequirement: UpdateAgentBillingRequirement = "unknown";
-        let billingError: string | null = null;
-
-        if (mainUpdateRequested) {
-          try {
-            const billingBypassed = await fetchBillingBypassStatus(npub);
-            billingRequirement = billingBypassed ? "bypassed" : "required";
-          } catch (e: any) {
-            billingError = `billing bypass check failed: ${e.message}`;
-            tradingDataResult.billingBypassWarning = billingError;
-            warnings.push(`Could not confirm billing bypass status before trading-data update: ${e.message}`);
-          }
-
-          if (billingRequirement !== "bypassed") {
-            try {
-              const billingWallet = buildBillingWallet();
-              tradingDataResult.billingWalletRegistration = await ensureBillingWalletRegistered({
-                npub,
-                publicKey,
-                privateKey,
-                wallet: billingWallet,
-              });
-              billingHeaders = await buildBillingHeaders(billingWallet);
-            } catch (e: any) {
-              billingError = e.message;
-              tradingDataResult.billingWarning = e.message;
-              warnings.push(`Billing wallet registration failed before trading-data update: ${e.message}`);
-            }
-          }
-
-          const billingDecision = decideUpdateAgentBilling({
-            requirement: billingRequirement,
-            billingHeaders,
-            billingError,
-          });
-          if (!billingDecision.canProceed) {
-            result.error = billingDecision.error;
-            result.tradingData = {
-              ...tradingDataResult,
-              ok: false,
-              blocked: true,
-              requirement: billingDecision.requirement,
-              requiresBillingHeaders: billingDecision.requiresBillingHeaders,
-              hasBillingHeaders: billingDecision.hasBillingHeaders,
-              error: billingDecision.error,
-            };
-            result.warnings = Array.from(new Set(warnings));
-            debugLog("update_agent", "result", result);
-            return textResult(result);
-          }
-        }
-
         const body: Record<string, unknown> = {
           id: params.agentId,
           timestamp: signedAt,
@@ -2217,7 +1467,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (hasOwnField(params, "strategyDescription")) body.strategyDescription = params.strategyDescription;
         if (hasOwnField(params, "isActive")) body.isActive = params.isActive;
         if (hasOwnField(params, "leverage")) body.leverage = params.leverage;
-        if (hasOwnField(params, "strategyFeePerPeriod")) body.strategyFeePerPeriod = params.strategyFeePerPeriod;
         if (hasOwnField(params, "mode")) body.mode = targetMode;
         if (hasOwnField(params, "marketType")) body.marketType = targetMarketType;
         if (hasOwnField(params, "symbol")) body.symbol = params.symbol;
@@ -2232,20 +1481,18 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         }
         if (hasOwnField(params, "copiedFromAgentId")) body.copiedFromAgentId = params.copiedFromAgentId;
 
-        debugLog("update_agent", "trading-data.req", { url: `${baseUrl}/api/agent`, body, hasBillingHeaders: Object.keys(billingHeaders).length > 0 });
+        debugLog("update_agent", "trading-data.req", { url: `${baseUrl}/api/agent`, body });
         const res = await fetch(`${baseUrl}/api/agent`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
             Authorization: auth,
-            ...billingHeaders,
           },
           body: JSON.stringify(body),
         });
         const responseBody = await parseResponseBody(res);
         const ok = res.ok && responseBody?.success !== false;
         result.tradingData = {
-          ...tradingDataResult,
           ok,
           status: res.status,
           body: responseBody,
@@ -2404,116 +1651,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     },
   });
 
-  api.registerTool({
-    name: "prepare_agent_creation",
-    description: "Read-only preflight for agent creation (direct or copy). Uses the user's nostrPrivateKey as the BSC/Ethereum signer, ensures the billing wallet is registered via /api/auth/login, determines whether upfront billing setup is required, loads active /api/nft-config eligibility, calculates OSWAP and vault credit requirements when needed, estimates BNB and gas needs, and returns the full execution plan before any on-chain transaction. OpenClaw must present this result to the user and get explicit confirmation before calling deploy_agent. Call this tool directly from the current session only; do not route it through a subagent, exec, or direct HTTP workaround. Keep optional fields omitted unless explicitly provided by the user.",
-    parameters: Type.Object({
-      name: Type.String({ description: "Agent name" }),
-      mode: Type.Optional(Type.String({ description: '"paper" or "live". Optional; omit unless specified by the user.' })),
-      marketType: Type.Optional(Type.String({ description: '"spot" or "perp". Optional; when copiedFromAgentId is provided, omit unless the user explicitly asks to override.' })),
-      symbol: Type.Optional(Type.String({ description: 'Trading pair, e.g. "ETH/USDC"' })),
-      copiedFromAgentId: Type.Optional(Type.Number({ description: "When copying an existing public agent, pass the source agent ID. symbol and marketType are resolved from the source by default; do not fabricate or pass optional overrides unless explicitly requested." })),
-    }),
-    async execute(
-      _id: string,
-      params: {
-        name: string;
-        mode?: string;
-        marketType?: string;
-        symbol?: string;
-        copiedFromAgentId?: number;
-      },
-    ) {
-      const { privateKey, npub, publicKey } = loadKeys(pluginConfig);
-      const effectiveMode = params.mode ?? "paper";
-      const effectiveMarketType = params.marketType ?? (params.copiedFromAgentId != null ? undefined : "spot");
-      try {
-        ensureAmmSpotEnabled(effectiveMode, effectiveMarketType);
-      } catch (e: any) {
-        return textResult({ error: e.message });
-      }
-      debugLog("prepare_agent_creation", "entry", {
-        name: params.name,
-        mode: effectiveMode,
-        marketType: params.marketType ?? "spot",
-        symbol: params.symbol,
-        copiedFromAgentId: params.copiedFromAgentId,
-        usesNostrPrivateKey: true,
-      });
-      if (params.copiedFromAgentId) {
-        let sourceAgent: any;
-        try {
-          sourceAgent = await fetchPublicAgentProfile(params.copiedFromAgentId);
-        } catch (e: any) {
-          return textResult({ error: e.message });
-        }
-        const sourceSymbol = typeof sourceAgent?.pair === "string" && sourceAgent.pair.trim()
-          ? sourceAgent.pair.trim()
-          : typeof sourceAgent?.symbol === "string" && sourceAgent.symbol.trim()
-            ? sourceAgent.symbol.trim()
-            : undefined;
-        if (!sourceSymbol) {
-          return textResult({ error: `Source agent ${params.copiedFromAgentId} is missing a trading pair; cannot prepare copy deployment` });
-        }
-        const sourceMarketType: "spot" | "perp" = sourceAgent?.marketType === "perp" ? "perp" : "spot";
-        const effectiveMode: string = params.mode ?? sourceAgent?.mode ?? "paper";
-        try {
-          ensureAmmSpotEnabled(effectiveMode, sourceMarketType);
-        } catch (e: any) {
-          return textResult({ error: e.message });
-        }
-        try {
-          const prepared = await prepareAgentCreationContext({
-            name: params.name,
-            mode: effectiveMode,
-            marketType: sourceMarketType,
-            symbol: sourceSymbol,
-            agentId: params.copiedFromAgentId,
-            npub,
-            publicKey,
-            privateKey,
-          });
-          return textResult({
-            ...prepared.prepared,
-            sourceAgent: {
-              id: params.copiedFromAgentId,
-              name: sourceAgent?.name ?? null,
-              pair: sourceSymbol,
-              mode: sourceAgent?.mode ?? null,
-              marketType: sourceMarketType,
-            },
-            confirmationRequired: true,
-            nextStep: "present_checkout_and_wait_for_explicit_confirmation",
-          });
-        } catch (e: any) {
-          return textResult({ error: e.message });
-        }
-      }
-      try {
-        const prepared = await prepareAgentCreationContext({
-          name: params.name,
-          mode: params.mode,
-          marketType: params.marketType,
-          symbol: params.symbol,
-          npub,
-          publicKey,
-          privateKey,
-        });
-        return textResult({
-          ...prepared.prepared,
-          confirmationRequired: true,
-          nextStep: "present_checkout_and_wait_for_explicit_confirmation",
-        });
-      } catch (e: any) {
-        return textResult({ error: e.message });
-      }
-    },
-  });
-
 
   api.registerTool({
     name: "deploy_agent",
-    description: "Create a trading agent, performing the full billing preflight and any required active NFT/vault setup before agent creation. Uses the user's nostrPrivateKey as the BSC/Ethereum signer and ensures the billing wallet is registered via /api/auth/login before billing checks. The server handles all downstream trading-bot and settlement syncing internally on POST /api/agent. Call this tool directly from the current session only; do not route it through a subagent, exec, or direct HTTP workaround. Conservative mode: only pass fields explicitly provided by the user, never invent defaults. If required values are missing, ask the user before retrying.",
+    description: "Create a trading agent. The server handles all downstream trading-bot and settlement syncing internally on POST /api/agent. Call this tool directly from the current session only; do not route it through a subagent, exec, or direct HTTP workaround. Conservative mode: only pass fields explicitly provided by the user, never invent defaults. If required values are missing, ask the user before retrying.",
     parameters: Type.Object({
       name: Type.String({ description: "Agent name" }),
       initialCapital: Type.Optional(Type.Number({ description: "Initial capital amount" })),
@@ -2626,9 +1767,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           const chainErr = validateChainIdForMarketType(resolvedChainId, marketType);
           if (chainErr) return textResult({ error: chainErr });
         }
-        // Crypto agents require a chainId; validate it here (before billing) so a
-        // missing chain fails fast instead of after billing side effects. Copy
-        // agents are exempt — trading-data resolves the chain from the source agent.
+        // Crypto agents require a chainId; validate it here so a missing chain
+        // fails fast. Copy agents are exempt — trading-data resolves the chain
+        // from the source agent.
         if (!isCopyAgent && resolvedChainId == null) {
           return textResult({ error: `chainId is required: ${SPOT_ALLOWED_CHAIN_IDS.join(", ")} for spot, ${PERP_ALLOWED_CHAIN_IDS.join(", ")} for perp.` });
         }
@@ -2640,10 +1781,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
       debugLog("deploy_agent", "entry", { ...params, usesNostrPrivateKey: true });
       const result: Record<string, unknown> = {};
-      let preparedContext: PreparedAgentCreationContext;
-      let billingHeaders: EthHeaders | undefined;
-      let billingWallet: Wallet | undefined;
-      let billingTransactions: Record<string, any> | undefined;
 
       let initialCapital = params.initialCapital;
       if (initialCapital == null && !isCopyAgent && !isLive) {
@@ -2659,66 +1796,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           }
         : undefined;
       debugLog("deploy_agent", "computed", { walletAddress, settlementConfig });
-
-      try {
-        preparedContext = await prepareAgentCreationContext({
-          name: params.name,
-          mode,
-          marketType,
-          symbol: params.symbol,
-          npub,
-          publicKey,
-          privateKey,
-        });
-      } catch (e: any) {
-        return textResult({ error: e.message });
-      }
-
-      const billingRequired = preparedContext.prepared.billing.required;
-      if (!billingRequired) {
-        result.billing = {
-          required: false,
-          bypassed: true,
-          reason: "billing_not_required",
-        };
-      } else {
-        const activeBillingWallet = preparedContext.billingWallet;
-        if (!activeBillingWallet) {
-          return textResult({ error: "Billing wallet could not be derived from nostrPrivateKey" });
-        }
-        billingWallet = activeBillingWallet;
-        billingTransactions = buildInitialBillingTransactions(preparedContext);
-        result.billing = {
-          required: true,
-          walletAddress: activeBillingWallet.address,
-          preflight: preparedContext.prepared,
-          confirmationRequired: true,
-          transactions: billingTransactions,
-        };
-
-        if (preparedContext.bnbShortfallRaw > 0n) {
-          return textResult({
-            error: `Insufficient BNB on ${billingEvmConfig.networkLabel}. Shortfall: ${formatAmount(preparedContext.bnbShortfallRaw, 18, 8)} BNB. Fund the billing wallet on ${billingEvmConfig.networkLabel}, not another chain.`,
-            billingShortfall: buildBillingBreakdown(preparedContext, billingEvmConfig),
-            ...result,
-          });
-        }
-        try {
-          billingHeaders = await executeBillingFundingTransactions({
-            preparedContext,
-            billingWallet: activeBillingWallet,
-            billingTransactions,
-            billingEvmConfig,
-            buildBillingHeaders,
-            waitForVaultCredit,
-          });
-        } catch (e: any) {
-          return textResult({
-            error: e.message,
-            ...result,
-          });
-        }
-      }
 
       // Step 1: Create agent (fatal if fails)
       let agentId: number;
@@ -2749,7 +1826,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           headers: {
             "Content-Type": "application/json",
             Authorization: auth,
-            ...(billingHeaders ?? {}),
           },
           body: JSON.stringify(payload),
         });
@@ -2806,39 +1882,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
             `UNVERIFIED_AGENT: Agent ID ${agentId} was assigned by the server but could not be immediately confirmed. ` +
             `Inform the user that creation was submitted with ID ${agentId} but verification is pending. ` +
             `Advise them to run list_my_agents to confirm before using the agent.`;
-        }
-      }
-
-      if (billingRequired && billingWallet) {
-        try {
-          const [postBalance, subscriptions] = await Promise.all([
-            fetchBillingBalanceSnapshot(billingWallet),
-            fetchBillingSubscriptions(billingWallet),
-          ]);
-          const matchedSubscription = subscriptions.find((subscription: any) => Number(subscription.agent_id) === agentId);
-          (result.billing as any).result = {
-            nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
-            vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-            updatedVaultCredit: formatAmount(postBalance.availableBalanceRaw, billingEvmConfig.tokenDecimals),
-            pendingWithdrawalCredit: formatAmount(postBalance.pendingWithdrawalBalanceRaw, billingEvmConfig.tokenDecimals),
-            feeBreakdown: preparedContext.prepared.fees,
-            agentId,
-            agentName: params.name,
-            creationTimestamp,
-            nextBillingDateEstimate: matchedSubscription?.next_renewal_at
-              ?? new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
-          };
-        } catch (e: any) {
-          (result.billing as any).result = {
-            nftStatus: preparedContext.hasEligibleNft ? "existing_nft_verified" : "nft_minted",
-            vaultDepositAmount: formatAmount(preparedContext.oswapForInitialVaultCreditRaw, billingEvmConfig.tokenDecimals),
-            feeBreakdown: preparedContext.prepared.fees,
-            agentId,
-            agentName: params.name,
-            creationTimestamp,
-            nextBillingDateEstimate: new Date(Date.now() + preparedContext.billingPeriodSeconds * 1_000).toISOString(),
-            warning: e.message,
-          };
         }
       }
 
@@ -2914,9 +1957,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     }),
     async execute(_id: string, params: { agentId: number }) {
       const { privateKey, publicKey } = loadKeys(pluginConfig);
-      const npub = Nip19.npubEncode(publicKey);
       const auth = getAuthHeader(publicKey, privateKey);
-      const billingWallet = buildBillingWallet();
       const result: Record<string, unknown> = {};
       const signedAt = Math.floor(Date.now() / 1000);
       debugLog("delete_agent", "entry", { agentId: params.agentId });
@@ -2930,13 +1971,11 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       // Step 1: Delete from trading-data (delegates to trading-bot and settlement engine)
       try {
-        const billingHeaders = await buildBillingHeaders(billingWallet);
         const res = await fetch(`${baseUrl}/api/agent/${params.agentId}`, {
           method: "DELETE",
           headers: {
             "Content-Type": "application/json",
             Authorization: auth,
-            ...billingHeaders,
           },
           body: JSON.stringify({ timestamp: signedAt }),
         });
@@ -3114,8 +2153,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     ) {
       const { privateKey, publicKey } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
-      const billingWallet = buildBillingWallet();
-      const billingHeaders = await buildBillingHeaders(billingWallet);
 
       const normalizedRange = normalizeBacktestTimeRange(
         params.startTime,
@@ -3150,7 +2187,6 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         headers: {
           "Content-Type": "application/json",
           Authorization: auth,
-          ...billingHeaders,
         },
         body: JSON.stringify(payload),
       });

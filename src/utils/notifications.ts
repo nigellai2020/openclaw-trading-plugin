@@ -16,31 +16,6 @@ function formatPrice(value: unknown): string {
   return Number.isFinite(num) ? `$${num.toFixed(4)}` : String(value ?? "N/A");
 }
 
-function formatShortTimestamp(epochSeconds: unknown): string | null {
-  const seconds = typeof epochSeconds === "number" ? epochSeconds : Number(epochSeconds);
-  if (!Number.isFinite(seconds)) return null;
-  return `${new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(seconds * 1000))} UTC`;
-}
-
-function formatRelativeDuration(totalSeconds: number): string {
-  if (totalSeconds <= 0) return "now";
-  if (totalSeconds < 60) return "less than a minute";
-  if (totalSeconds < 3600) {
-    const minutes = Math.round(totalSeconds / 60);
-    return `about ${minutes} minute${minutes === 1 ? "" : "s"}`;
-  }
-  if (totalSeconds < 86400) {
-    const hours = Math.round(totalSeconds / 3600);
-    return `about ${hours} hour${hours === 1 ? "" : "s"}`;
-  }
-  const days = Math.round(totalSeconds / 86400);
-  return `about ${days} day${days === 1 ? "" : "s"}`;
-}
-
 export function formatBacktestSummary(event: any): string[] {
   const { scheduled_at, agents } = event;
   if (!Array.isArray(agents) || agents.length === 0) return [];
@@ -143,38 +118,6 @@ export function formatAgentDeactivationNotification(event: any): string {
     : "";
 
   return `[Agent update] ${agentLabel} was deactivated after ${reason}.${source}`;
-}
-
-export function formatBillingExpiryNotification(event: any): string {
-  if (typeof event?.message === "string" && event.message.trim()) {
-    return event.message.trim();
-  }
-
-  const agentId = event?.agent_id ?? event?.agentId;
-  const agentName = event?.agent_name ?? event?.agentName ?? "Unknown Agent";
-  const agentLabel = formatAgentLabel(agentName, agentId);
-  const secondsLeft = typeof event?.seconds_left === "number"
-    ? event.seconds_left
-    : Number(event?.seconds_left);
-  const renewalAt = formatShortTimestamp(event?.renewal_at);
-  const isExpiredEvent = event?.event === "agent_billing_expired";
-
-  if (Number.isFinite(secondsLeft) && renewalAt) {
-    if (isExpiredEvent || secondsLeft <= 0) {
-      return `[Billing update] ${agentLabel} billing expired at ${renewalAt}.`;
-    }
-    return `[Billing reminder] ${agentLabel} billing renews in ${formatRelativeDuration(secondsLeft)}, at ${renewalAt}.`;
-  }
-
-  if (renewalAt) {
-    return isExpiredEvent
-      ? `[Billing update] ${agentLabel} billing expired at ${renewalAt}.`
-      : `[Billing reminder] ${agentLabel} billing is due soon, around ${renewalAt}.`;
-  }
-
-  return isExpiredEvent
-    ? `[Billing update] ${agentLabel} billing has expired.`
-    : `[Billing reminder] ${agentLabel} billing is due soon.`;
 }
 
 export type TelegramInlineKeyboardButton = {

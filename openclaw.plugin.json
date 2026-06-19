@@ -12,15 +12,10 @@
       "get_nostr_identity",
       "get_hyperliquid_balance",
       "get_evm_wallet_balance",
-      "get_billing_subscriptions",
-      "prepare_agent_vault_credit_top_up",
-      "top_up_agent_vault_credit",
-      "reactivate_expired_agent",
       "get_agent",
       "update_agent",
       "init_trading_session",
       "request_hyperliquid_setup_flow",
-      "prepare_agent_creation",
       "deploy_agent",
       "search_public_agents",
       "list_my_agents",
@@ -60,7 +55,7 @@
       },
       "hyperliquidManagementUrl": {
         "type": "string",
-        "default": "https://hyperliquid-management.pages.dev"
+        "default": "https://hyperliquid.openswap.xyz"
       },
       "enableAmmSpot": {
         "type": "boolean",
@@ -70,74 +65,6 @@
         "type": "string",
         "enum": ["testnet", "mainnet"],
         "default": "testnet"
-      },
-      "bscBillingRpcUrl": {
-        "type": "string",
-        "default": "https://data-seed-prebsc-1-s1.binance.org:8545"
-      },
-      "bscBillingRouterAddress": {
-        "type": "string",
-        "default": "0x8AEb7abBCfe0ED8baAfa3ddD2CdE39cDBb4d0106"
-      },
-      "bscBillingWethAddress": {
-        "type": "string",
-        "default": "0xae13d989dac2f0debff460ac112a837c89baa7cd"
-      },
-      "bscBillingTokenAddress": {
-        "type": "string",
-        "default": "0x45eee762aaeA4e5ce317471BDa8782724972Ee19"
-      },
-      "bscBillingTokenSymbol": {
-        "type": "string",
-        "default": "OSWAP"
-      },
-      "bscBillingTokenDecimals": {
-        "type": "number",
-        "default": 18
-      },
-      "bscBillingVaultAddress": {
-        "type": "string",
-        "default": "0x15780a63c8a47dd27c4c7f7d17673929e0cb4d05"
-      },
-      "bscEligibleNftAddress": {
-        "type": "string",
-        "default": "0xc32c70c6cc2338daa3fdfbb25c98f1227c673175"
-      },
-      "bscEligibleNftExplorerUrl": {
-        "type": "string",
-        "default": "https://testnet.bscscan.com/address/0xc32c70c6cc2338daa3fdfbb25c98f1227c673175"
-      },
-      "bscEligibleNftName": {
-        "type": "string",
-        "default": "Troll NFT"
-      },
-      "bscEligibleNftMinimumStake": {
-        "type": "number",
-        "default": 20
-      },
-      "bscEligibleNftProtocolFee": {
-        "type": "number",
-        "default": 10
-      },
-      "bscEligibleNftTotalMintingFee": {
-        "type": "number",
-        "default": 30
-      },
-      "billingSwapSlippageBps": {
-        "type": "number",
-        "default": 50
-      },
-      "billingPollIntervalMs": {
-        "type": "number",
-        "default": 5000
-      },
-      "billingPollTimeoutMs": {
-        "type": "number",
-        "default": 90000
-      },
-      "billingFallbackGasPriceWei": {
-        "type": "number",
-        "default": 5000000000
       },
       "nostrRelayUrl": {
         "type": "string",
