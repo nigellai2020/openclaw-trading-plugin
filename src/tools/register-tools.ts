@@ -286,7 +286,11 @@ async function requestHyperliquidSetupFlow(input: {
 }): Promise<HyperliquidSetupRequestResult> {
   const { privateKey, publicKey } = loadKeys(input.pluginConfig);
   const network = input.network === "mainnet" ? "mainnet" : "testnet";
-  const hyperliquidManagementUrl = input.pluginConfig.hyperliquidManagementUrl || "https://hyperliquid-management.pages.dev";
+  const configuredManagementUrl = input.pluginConfig.hyperliquidManagementUrl;
+  if (typeof configuredManagementUrl !== "string" || configuredManagementUrl.trim() === "") {
+    throw new Error("hyperliquidManagementUrl is not configured");
+  }
+  const hyperliquidManagementUrl = configuredManagementUrl.trim().replace(/\/+$/, "");
   const auth = getAuthHeader(publicKey, privateKey);
   const requestBody = { network };
 
