@@ -48,6 +48,8 @@ Replace `${NOSTR_PRIVATE_KEY}` with your Nostr private key (hex). To override an
 
 The Nostr connection enables real-time trading notifications via Telegram. The plugin subscribes to NIP-04 kind-4 direct messages tagged to your derived Nostr public key and forwards supported events such as `fill_executed`, `backtest_completed`, and `agent_deactivated` to your Telegram chat.
 
+OpenClaw now only starts plugin services for plugins loaded during gateway startup or an explicit gateway reload. This plugin therefore declares `activation.onStartup: true`; after installing or updating it, you must restart the gateway so the Nostr notification subscriber is actually started.
+
 ## 4. Start the Gateway
 
 ```bash

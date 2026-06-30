@@ -1,6 +1,9 @@
 {
   "id": "trading-plugin",
   "skills": ["./skills"],
+  "activation": {
+    "onStartup": true
+  },
   "contracts": {
     "tools": [
       "get_token_prices",
