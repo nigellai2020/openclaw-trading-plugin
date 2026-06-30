@@ -20,11 +20,29 @@ export function createToolsContext(api: any) {
 
   const debugLogPath = path.join(os.homedir(), ".openclaw", "logs", "trading-debug.json");
 
-  function debugLog(tool: string, step: string, data: unknown) {
+  // Debug logging can be disabled by setting OPENCLAW_TRADING_DEBUG=0 or OPENCLAW_DEBUG=0
+  const _dbgEnv = (process.env.OPENCLAW_TRADING_DEBUG ?? process.env.OPENCLAW_DEBUG ?? "").toString().toLowerCase();
+  const debugLogEnabled = _dbgEnv !== "0" && _dbgEnv !== "false";
+  let debugLogStream: fs.WriteStream | null = null;
+  if (debugLogEnabled) {
     try {
       fs.mkdirSync(path.dirname(debugLogPath), { recursive: true });
+      debugLogStream = fs.createWriteStream(debugLogPath, { flags: "a" });
+      // avoid unhandled errors from the stream
+      debugLogStream.on("error", () => {});
+      process.on("exit", () => {
+        try {
+          debugLogStream?.end();
+        } catch {}
+      });
+    } catch {}
+  }
+
+  function debugLog(tool: string, step: string, data: unknown) {
+    if (!debugLogEnabled) return;
+    try {
       const entry = { ts: new Date().toISOString(), tool, step, data };
-      fs.appendFileSync(debugLogPath, JSON.stringify(entry) + "\n");
+      debugLogStream?.write(JSON.stringify(entry) + "\n");
     } catch {}
   }
 
