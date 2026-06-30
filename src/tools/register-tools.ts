@@ -22,6 +22,7 @@ import {
   sendTelegramMessage,
   type TelegramInlineKeyboard,
 } from "../utils/notifications.js";
+import { normalizeStrategyRuleWhens } from "../utils/strategy-normalization.js";
 import { fetchSupportedPairsFromApi } from "../utils/supported-pairs.js";
 
 type AgentTradeRange = "12h" | "24h" | "1d" | "3d" | "7d" | "30d" | "all";
@@ -1157,6 +1158,9 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const { privateKey, publicKey } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
       const signedAt = Math.floor(Date.now() / 1000);
+      const normalizedRequestedStrategy = params.strategy
+        ? normalizeStrategyRuleWhens(params.strategy)
+        : params.strategy;
       const requestedFields = [
         "name",
         "description",
@@ -1331,7 +1335,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       }
 
       const resolvedWalletRecord = requestedWalletRecord ?? currentWalletRecord;
-      const nextStrategy = hasOwnField(params, "strategy") ? params.strategy : currentSettings?.strategy;
+      const nextStrategy = hasOwnField(params, "strategy") ? normalizedRequestedStrategy : currentSettings?.strategy;
       const currentSymbol = inferSymbolFromStrategy(currentSettings?.strategy);
       const resolvedSymbol = params.symbol ?? inferSymbolFromStrategy(nextStrategy) ?? currentSymbol ?? null;
       const resolvedChainId = hasOwnField(params, "chainId") ? params.chainId ?? null : currentSettings?.chainId ?? null;
@@ -1467,7 +1471,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (hasOwnField(params, "name")) body.name = params.name;
         if (hasOwnField(params, "description")) body.description = params.description;
         if (hasOwnField(params, "avatarUrl")) body.avatarUrl = params.avatarUrl;
-        if (hasOwnField(params, "strategy")) body.strategy = params.strategy;
+        if (hasOwnField(params, "strategy")) body.strategy = normalizedRequestedStrategy;
         if (hasOwnField(params, "strategyDescription")) body.strategyDescription = params.strategyDescription;
         if (hasOwnField(params, "isActive")) body.isActive = params.isActive;
         if (hasOwnField(params, "leverage")) body.leverage = params.leverage;
@@ -1701,7 +1705,10 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
       const { privateKey, publicKey, npub } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
       const isCopyAgent = params.copiedFromAgentId != null;
-      if (!params.strategy && !isCopyAgent) {
+      const normalizedStrategy = params.strategy
+        ? normalizeStrategyRuleWhens(params.strategy)
+        : params.strategy;
+      if (!normalizedStrategy && !isCopyAgent) {
         return textResult({
           error:
             "strategy is required when copiedFromAgentId is not provided. " +
@@ -1816,7 +1823,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
         if (leverage != null) payload.leverage = leverage;
         if (resolvedChainId != null) payload.chainId = resolvedChainId;
         payload.assetType = "crypto";
-        if (params.strategy) payload.strategy = params.strategy;
+        if (normalizedStrategy) payload.strategy = normalizedStrategy;
         if (params.strategyDescription) payload.strategyDescription = params.strategyDescription;
         if (params.copiedFromAgentId != null) payload.copiedFromAgentId = params.copiedFromAgentId;
         if (params.symbol) payload.symbol = params.symbol;
@@ -1833,16 +1840,25 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
           },
           body: JSON.stringify(payload),
         });
-        if (!res.ok) {
-          const errText = await res.text();
-          debugLog("deploy_agent", "create.api.res", { status: res.status, error: errText });
-          result.create = { ok: false, error: `create_agent failed: ${res.status} ${errText}` };
+        const data = await parseResponseBody(res);
+        const rawAgentId = data && typeof data === "object" ? (data as { agentId?: unknown }).agentId : undefined;
+        const parsedAgentId = typeof rawAgentId === "number"
+          ? rawAgentId
+          : typeof rawAgentId === "string" && rawAgentId.trim() !== "" && Number.isFinite(Number(rawAgentId))
+            ? Number(rawAgentId)
+            : null;
+        debugLog("deploy_agent", "create.api.res", { status: res.status, body: data });
+        if (!res.ok || data?.success === false || parsedAgentId == null) {
+          result.create = {
+            ok: false,
+            status: res.status,
+            body: data,
+            error: `create_agent failed: ${res.status} ${responseErrorMessage(data)}`,
+          };
           return textResult(result);
         }
-        const data = await res.json();
-        agentId = data.agentId;
+        agentId = parsedAgentId;
         agentUrl = `${webUrl}/trading-agents/${publicKey}/${agentId}`;
-        debugLog("deploy_agent", "create.api.res", { status: res.status, body: data });
         result.create = { ok: true, agentId, agentUrl, createdAt: creationTimestamp };
       } catch (e: any) {
         result.create = { ok: false, error: e.message };
@@ -2157,6 +2173,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
     ) {
       const { privateKey, publicKey } = loadKeys(pluginConfig);
       const auth = getAuthHeader(publicKey, privateKey);
+      const normalizedStrategy = normalizeStrategyRuleWhens(params.strategy);
 
       const normalizedRange = normalizeBacktestTimeRange(
         params.startTime,
@@ -2179,7 +2196,7 @@ export default function registerTools(api: any, ctx: ToolsContext = createToolsC
 
       const payload: Record<string, unknown> = {
         initialCapital: params.initialCapital,
-        strategy: params.strategy,
+        strategy: normalizedStrategy,
         startTime: normalizedRange.startTime,
         endTime: normalizedRange.endTime,
       };
